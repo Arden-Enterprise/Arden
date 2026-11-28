@@ -91,7 +91,7 @@ async function insertSession(client: PoolClient, adminId: string, expiresAt: Dat
   await client.query("DELETE FROM arden_system.admin_session WHERE expires_at < now() - interval '7 days'");
   const result = await client.query<{ session_id: string; admin_id: string; expires_at: Date }>(
     `INSERT INTO arden_system.admin_session (admin_id, expires_at)
-     VALUES ($1, $2) RETURNING session_id, admin_id, expires_at`,
+     VALUES ($1, $2) RETURNING id AS session_id, admin_id, expires_at`,
     [adminId, expiresAt],
   );
   const row = result.rows[0];
@@ -104,7 +104,7 @@ export async function recordSystemAdministrationEvent(client: PoolClient, actorI
   targetId: string | null, requestId: string, details: Record<string, unknown> = {}): Promise<void> {
   await client.query(
     `INSERT INTO arden_system.administration_event (
-       actor_admin_id, event_type, target_admin_id, request_id, details_json
+       actor_id, event_type, target_id, request_id, details
      ) VALUES ($1, $2, $3, $4, $5::jsonb)`,
     [actorId, eventType, targetId, requestId, JSON.stringify(details)],
   );
@@ -145,9 +145,9 @@ export class PgSystemAuthStore implements SystemAuthStore {
       try {
         const result = await client.query<SystemAdminRow>(
           `INSERT INTO arden_system.administrator (
-             email, full_name, password_hash, status, can_manage_system_admins, granted_by_admin_id
+             email, full_name, password_hash, status, can_manage_system_admins, granted_by_id
            ) VALUES ($1, $2, $3, 'ACTIVE', true, NULL)
-           RETURNING admin_id, email, full_name, status, can_manage_system_admins`,
+           RETURNING id AS admin_id, email, full_name, status, can_manage_system_admins`,
           [input.email, input.fullName, input.passwordHash],
         );
         inserted = result.rows[0];
@@ -171,7 +171,7 @@ export class PgSystemAuthStore implements SystemAuthStore {
   async authenticateByEmail(email: string): Promise<{ account: SystemAdminAccount; passwordHash: string } | null> {
     return this.database.transaction("sign_in", {}, async (client) => {
       const result = await client.query<SystemAdminRow>(
-        `SELECT admin_id, email, full_name, status, can_manage_system_admins, password_hash
+        `SELECT id AS admin_id, email, full_name, status, can_manage_system_admins, password_hash
            FROM arden_system.administrator
           WHERE email = $1 AND status = 'ACTIVE'`,
         [email],
@@ -185,7 +185,7 @@ export class PgSystemAuthStore implements SystemAuthStore {
   async startSession(adminId: string, requestId: string, expiresAt: Date): Promise<SystemAdminSessionRecord> {
     return this.database.transaction("sign_in", { actorId: adminId }, async (client) => {
       const active = await client.query(
-        "SELECT 1 FROM arden_system.administrator WHERE admin_id = $1 AND status = 'ACTIVE' FOR SHARE",
+        "SELECT 1 FROM arden_system.administrator WHERE id = $1 AND status = 'ACTIVE' FOR SHARE",
         [adminId],
       );
       if (!active.rowCount) throw new Error("System Admin is no longer active");
@@ -203,16 +203,16 @@ export class PgSystemAuthStore implements SystemAuthStore {
   async getActiveSession(sessionId: string) {
     return this.database.transaction("session", { sessionId }, async (client) => {
       const session = await client.query<{ session_id: string; admin_id: string; expires_at: Date }>(
-        `SELECT session_id, admin_id, expires_at FROM arden_system.admin_session
-          WHERE session_id = $1 AND revoked_at IS NULL AND expires_at > now()`,
+        `SELECT id AS session_id, admin_id, expires_at FROM arden_system.admin_session
+          WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()`,
         [sessionId],
       );
       const sessionRow = session.rows[0];
       if (!sessionRow) return null;
       await setSystemActor(client, sessionRow.admin_id);
       const account = await client.query<SystemAdminRow>(
-        `SELECT admin_id, email, full_name, status, can_manage_system_admins
-           FROM arden_system.administrator WHERE admin_id = $1 AND status = 'ACTIVE'`,
+        `SELECT id AS admin_id, email, full_name, status, can_manage_system_admins
+           FROM arden_system.administrator WHERE id = $1 AND status = 'ACTIVE'`,
         [sessionRow.admin_id],
       );
       const accountRow = account.rows[0];
@@ -228,7 +228,7 @@ export class PgSystemAuthStore implements SystemAuthStore {
     await this.database.transaction("session", { sessionId }, async (client) => {
       const ended = await client.query<{ admin_id: string }>(
         `UPDATE arden_system.admin_session SET revoked_at = now()
-          WHERE session_id = $1 AND revoked_at IS NULL RETURNING admin_id`,
+          WHERE id = $1 AND revoked_at IS NULL RETURNING admin_id`,
         [sessionId],
       );
       const adminId = ended.rows[0]?.admin_id;
@@ -242,7 +242,7 @@ export class PgSystemAuthStore implements SystemAuthStore {
     return this.database.transaction(scope === "setup" ? "setup" : "sign_in", {}, async (client) => {
       const result = await client.query<{ retry_after: string | null }>(
         `SELECT ceil(extract(epoch FROM locked_until - now()))::text AS retry_after
-           FROM arden_system.auth_throttle WHERE bucket = $1 AND locked_until > now()`,
+           FROM arden_system.auth_throttle WHERE bucket_key = $1 AND locked_until > now()`,
         [throttleBucket(scope, key)],
       );
       const seconds = Number(result.rows[0]?.retry_after ?? 0);
@@ -255,12 +255,12 @@ export class PgSystemAuthStore implements SystemAuthStore {
       const bucket = throttleBucket(scope, key);
       await client.query("DELETE FROM arden_system.auth_throttle WHERE updated_at < now() - interval '1 day'");
       await client.query(
-        "INSERT INTO arden_system.auth_throttle (bucket) VALUES ($1) ON CONFLICT (bucket) DO NOTHING",
+        "INSERT INTO arden_system.auth_throttle (bucket_key) VALUES ($1) ON CONFLICT (bucket_key) DO NOTHING",
         [bucket],
       );
       const current = await client.query<{ failures: number; window_expired: boolean }>(
         `SELECT failures, window_started_at < now() - make_interval(secs => $2) AS window_expired
-           FROM arden_system.auth_throttle WHERE bucket = $1 FOR UPDATE`,
+           FROM arden_system.auth_throttle WHERE bucket_key = $1 FOR UPDATE`,
         [bucket, throttleWindowSeconds],
       );
       const row = current.rows[0];
@@ -273,7 +273,7 @@ export class PgSystemAuthStore implements SystemAuthStore {
                 window_started_at = CASE WHEN $3::boolean THEN now() ELSE window_started_at END,
                 locked_until = CASE WHEN $4::integer > 0 THEN now() + make_interval(secs => $4::integer) ELSE NULL END,
                 updated_at = now()
-          WHERE bucket = $1`,
+          WHERE bucket_key = $1`,
         [bucket, failures, restart, lockSeconds],
       );
       return lockSeconds > 0 ? { retryAfterSeconds: lockSeconds } : null;
@@ -282,7 +282,7 @@ export class PgSystemAuthStore implements SystemAuthStore {
 
   async clearThrottle(scope: ThrottleScope, key: string): Promise<void> {
     await this.database.transaction(scope === "setup" ? "setup" : "sign_in", {}, async (client) => {
-      await client.query("DELETE FROM arden_system.auth_throttle WHERE bucket = $1", [throttleBucket(scope, key)]);
+      await client.query("DELETE FROM arden_system.auth_throttle WHERE bucket_key = $1", [throttleBucket(scope, key)]);
     });
   }
 }

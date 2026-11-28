@@ -74,11 +74,11 @@ describe("concise user-facing copy", () => {
     expect(screen.queryByRole("button", { name: "Attachments aren’t available yet" })).toBeNull();
   });
 
-  it.each(["DEPARTMENT", "ORGANIZATION"] as const)("shows the %s boundary before approving group readers", async (scope) => {
+  it.each(["DEPARTMENT", "ORGANIZATION"] as const)("shows the %s boundary before approving Target Readers", async (scope) => {
     mockKnowledge();
     vi.mocked(api.loadKnowledgeOptions).mockResolvedValue({
       departments: [{ id: "dept", name: "Engineering" }], primaryDepartmentId: "dept",
-      audiences: [{ id: "readers", name: "Project group", kind: "GROUP", departmentId: null }],
+      audiences: [],
     });
     vi.mocked(api.listKnowledgeReviewBoard).mockResolvedValue({ items: [{
       submissionId: "submission", snapshotId: "version", title: "Group guide", departmentId: "dept",
@@ -87,7 +87,8 @@ describe("concise user-facing copy", () => {
     vi.spyOn(api, "loadKnowledgeReview").mockResolvedValue({
       id: "submission", draftId: "draft", snapshotVersionId: "version", title: "Group guide",
       classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: scope,
-      targetDepartmentId: scope === "DEPARTMENT" ? "dept" : null, audienceIds: ["readers"],
+      targetDepartmentId: scope === "DEPARTMENT" ? "dept" : null, audienceIds: [],
+      proposedTargetReaders: { mode: scope, departmentId: scope === "DEPARTMENT" ? "dept" : null, memberIds: [] },
       contentHash: "private-hash", status: "PENDING_REVIEW", publicationState: "NONE",
       submittedAt: "2026-10-01T00:00:00Z", publishedVersionId: null, decisionComment: null,
       body: "Document content", mimeType: "text/plain", submittedByMembershipId: "author", teamTag: null, projectTag: null,
@@ -100,7 +101,8 @@ describe("concise user-facing copy", () => {
     await screen.findByRole("button", { name: "Approve", exact: true });
     const boundary = screen.getByText("Within").parentElement;
     expect(boundary?.textContent).toBe(`Within${scope === "DEPARTMENT" ? "Engineering" : "Across departments"}`);
-    expect(screen.getByText("Project group")).toBeTruthy();
+    expect(screen.getByText("Readers", { exact: true }).parentElement?.textContent)
+      .toBe(`Readers${scope === "DEPARTMENT" ? "Engineering" : "Everyone in organization"}`);
     expect(screen.queryByText("private-hash")).toBeNull();
     const decide = vi.spyOn(api, "decideKnowledgeReview");
     fireEvent.change(screen.getByRole("textbox", { name: /Note to the author/ }), { target: { value: "Unsent review note" } });

@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "../db/repository.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
 import { CatalogError } from "./catalog-store.js";
-import { inventoryCollectionLegacy, migrateCollectionLegacy, type CollectionLegacyPlan } from "./collection-legacy.js";
 import type { TargetReadersInput } from "../target-readers/policy.js";
 import { registerHomeHttpVerification } from "./home-http.integration.verification.js";
 import { registerLegacyMetadataVerification } from "./legacy-metadata.integration.verification.js";
@@ -76,10 +75,10 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       { name: `Catalog QA ${owner}`, departmentName: "Engineering" }, "catalog-fixture");
     org = created.organizationId; department = created.departmentId!;
     ownerMembership = (await repository!.requireActiveMembership(owner, org))!.membershipId;
-    await pool!.query("INSERT INTO arden.user_account (user_id, email, full_name) VALUES ($1, $2, 'Catalog reader')", [member, `${member}@example.test`]);
-    await pool!.query("INSERT INTO arden.organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3)", [memberId, org, member]);
-    await pool!.query("INSERT INTO arden.user_account (user_id, email, full_name) VALUES ($1, $2, 'Other reader')", [colleague, `${colleague}@example.test`]);
-    await pool!.query("INSERT INTO arden.organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3)", [colleagueId, org, colleague]);
+    await pool!.query("INSERT INTO arden.account (id, email, full_name) VALUES ($1, $2, 'Catalog reader')", [member, `${member}@example.test`]);
+    await pool!.query("INSERT INTO arden.membership (id, organization_id, account_id) VALUES ($1, $2, $3)", [memberId, org, member]);
+    await pool!.query("INSERT INTO arden.account (id, email, full_name) VALUES ($1, $2, 'Other reader')", [colleague, `${colleague}@example.test`]);
+    await pool!.query("INSERT INTO arden.membership (id, organization_id, account_id) VALUES ($1, $2, $3)", [colleagueId, org, colleague]);
   });
   afterAll(async () => {
     if (!pool) return;
@@ -90,23 +89,24 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         // Cleanup is session-local and limited to this synthetic organization.
         await client.query("SET LOCAL session_replication_role = replica");
         await client.query("SET LOCAL search_path TO arden, public");
-        await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE organization_id = $1)", [org]);
-        await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE organization_id = $1)", [org]);
-        await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)", [org]);
-        await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)", [org]);
-        for (const table of ["knowledge_collection_placement", "knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
-          "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_base",
-          "audit_event", "audience_group_membership", "audience", "reviewer_grant"]) {
+        await client.query("DELETE FROM working_version WHERE document_id IN (SELECT id AS shared_draft_id FROM company_document WHERE organization_id = $1)", [org]);
+        await client.query("DELETE FROM published_version WHERE document_id IN (SELECT id AS shared_draft_id FROM company_document WHERE organization_id = $1)", [org]);
+        await client.query("DELETE FROM review_decision WHERE review_submission_id IN (SELECT id AS submission_id FROM review_submission WHERE organization_id = $1)", [org]);
+        for (const table of ["handbook_placement", "handbook", "current_publication", "index_generation",
+          "review_submission", "company_document", "policy_reader", "reader_policy", "knowledge_base",
+          "audit_event", "reviewer_grant"]) {
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
         }
-        await client.query("DELETE FROM department_membership WHERE membership_id IN (SELECT membership_id FROM organization_membership WHERE organization_id = $1)", [org]);
-        await client.query("DELETE FROM role_assignment WHERE membership_id IN (SELECT membership_id FROM organization_membership WHERE organization_id = $1)", [org]);
-        await client.query("DELETE FROM role_permission WHERE role_id IN (SELECT role_id FROM role WHERE organization_id = $1)", [org]);
-        await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id=d.workspace_id JOIN organization_membership m ON m.membership_id=w.membership_id WHERE m.organization_id=$1)", [org]);
-        await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT w.workspace_id FROM private_workspace w JOIN organization_membership m ON m.membership_id=w.membership_id WHERE m.organization_id=$1)", [org]);
-        await client.query("DELETE FROM private_workspace WHERE membership_id IN (SELECT membership_id FROM organization_membership WHERE organization_id=$1)", [org]);
-        for (const table of ["organization_membership", "department", "role", "access_scope", "organization"]) await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
-        await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [[owner, member, colleague]]);
+        await client.query("DELETE FROM department_membership WHERE membership_id IN (SELECT id AS membership_id FROM membership WHERE organization_id = $1)", [org]);
+        await client.query("DELETE FROM role_assignment WHERE membership_id IN (SELECT id AS membership_id FROM membership WHERE organization_id = $1)", [org]);
+        await client.query("DELETE FROM role_permission WHERE role_id IN (SELECT id AS role_id FROM role WHERE organization_id = $1)", [org]);
+        await client.query("DELETE FROM private_version WHERE document_id IN (SELECT d.id AS draft_id FROM private_document d JOIN private_workspace w ON w.id=d.workspace_id JOIN membership m ON m.id=w.membership_id WHERE m.organization_id=$1)", [org]);
+        await client.query("DELETE FROM private_document WHERE workspace_id IN (SELECT w.id AS workspace_id FROM private_workspace w JOIN membership m ON m.id=w.membership_id WHERE m.organization_id=$1)", [org]);
+        await client.query("DELETE FROM private_workspace WHERE membership_id IN (SELECT id AS membership_id FROM membership WHERE organization_id=$1)", [org]);
+        for (const table of ["membership", "department", "role", "access_scope"])
+          await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
+        await client.query("DELETE FROM organization WHERE id = $1", [org]);
+        await client.query("DELETE FROM account WHERE id = ANY($1::uuid[])", [[owner, member, colleague]]);
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -159,16 +159,17 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     const legacyDowngrade = await repo.updateKnowledgeDraft(owner, org, draftId, 2, {
       targetScopeType: "DEPARTMENT", audienceRoleIds: [], teamTag: "misroute-review",
     }, null, "legacy-downgrade");
-    expect(legacyDowngrade).toMatchObject({ kind: "updated", draft: { targetScopeType: "ORGANIZATION", teamTag: null } });
-    const submitted = await repo.submitKnowledgeDraft(owner, org, draftId, 3, randomUUID(), "submit");
+    expect(legacyDowngrade).toEqual({ kind: "invalid-metadata" });
+    expect(await repo.getKnowledgeDraft(owner, org, draftId)).toMatchObject({ targetScopeType: "ORGANIZATION" });
+    const submitted = await repo.submitKnowledgeDraft(owner, org, draftId, 2, randomUUID(), "submit");
     if (submitted.kind !== "submitted") throw new Error("Submission fixture failed");
     expect(submitted.submission.management).toMatchObject({ ...metadata, releaseKind: "NEW" });
     expect(submitted.submission.management).not.toHaveProperty("topicId");
-    const changed = await repo.updateKnowledgeDraft(owner, org, draftId, 3, { management: { ...metadata, version: "9.0" } }, null, "edit-pending");
+    const changed = await repo.updateKnowledgeDraft(owner, org, draftId, 2, { management: { ...metadata, version: "9.0" } }, null, "edit-pending");
     expect(changed.kind).toBe("updated");
     expect((await repo.listKnowledgeSubmissions(owner, org))![0]!.management?.version).toBe("1.0");
     const locked = await pool!.connect();
-    try { await locked.query("BEGIN"); await expect(locked.query("UPDATE arden.shared_submission SET management = '{}' WHERE submission_id = $1", [submitted.submission.id])).rejects.toMatchObject({ code: "55000" }); }
+    try { await locked.query("BEGIN"); await expect(locked.query("UPDATE arden.review_submission SET metadata = '{}' WHERE id = $1", [submitted.submission.id])).rejects.toMatchObject({ code: "55000" }); }
     finally { await locked.query("ROLLBACK"); locked.release(); }
     const decision = await repo.decideReview(owner, org, submitted.submission.id, "APPROVE", submitted.submission.snapshotVersionId,
       submitted.submission.contentHash, null, randomUUID(), "approve");
@@ -183,21 +184,21 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     await catalog.place(owner, org, draftId, 0, collection.id, "place-guide");
     expect((await catalog.list(member, org)).collections[0]!.documentIds).toEqual([publicationId]);
     await expect(catalog.place(owner, org, randomUUID(), 0, collection.id, "bad-source")).rejects.toMatchObject({ code: "UNAVAILABLE" });
-    await pool!.query("UPDATE arden.organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1", [memberId]);
+    await pool!.query("UPDATE arden.membership SET status = 'SUSPENDED' WHERE id = $1", [memberId]);
     await expect(catalog.list(member, org)).rejects.toMatchObject({ code: "UNAVAILABLE" });
-    await pool!.query("UPDATE arden.organization_membership SET status = 'ACTIVE' WHERE membership_id = $1", [memberId]);
+    await pool!.query("UPDATE arden.membership SET status = 'ACTIVE' WHERE id = $1", [memberId]);
     await catalog.write(owner, org, "collections", collection.id, collection.version, { name: "Engineering handbook", description: "",
       status: "INACTIVE", cover: "production", allowedTypes: ["Guide"] }, "deactivate");
     expect((await catalog.list(member, org)).collections).toEqual([]);
     expect(await repo.getPublishedKnowledge(member, org, publicationId)).not.toBeNull();
     // Admin authority is not a read entitlement. Publish a replacement for two
     // other readers, retaining the same logical identity but excluding its author.
-    const replacement = await repo.updateKnowledgeDraft(owner, org, draftId, 4, {
+    const replacement = await repo.updateKnowledgeDraft(owner, org, draftId, 3, {
       management: { ...metadata, version: "2.0", changeNote: "Narrowed working guidance." },
       targetReaders: { mode: "SELECTED_MEMBERS", memberIds: [memberId, colleagueId] },
     }, null, "restricted-replacement");
     expect(replacement.kind).toBe("updated");
-    const second = await repo.submitKnowledgeDraft(owner, org, draftId, 5, randomUUID(), "restricted-submit");
+    const second = await repo.submitKnowledgeDraft(owner, org, draftId, 4, randomUUID(), "restricted-submit");
     if (second.kind !== "submitted") throw new Error("Replacement fixture failed");
     await repo.decideReview(owner, org, second.submission.id, "APPROVE", second.submission.snapshotVersionId,
       second.submission.contentHash, null, randomUUID(), "restricted-approve");
@@ -255,9 +256,6 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     await catalog.place(owner, org, common.draftId, 0, mixed.id, "place-common");
     const hidden = await catalog.write(owner, org, "collections", null, null, { name: `Restricted legacy ${mode}`, description: "",
       status: "ACTIVE", allowedTypes: ["Guide"] }, "create-legacy-shell");
-    // Trusted setup models pre-KM2 links without relaxing runtime policies.
-    await pool!.query(`INSERT INTO arden.knowledge_collection_document (collection_id, organization_id, published_version_id, ordinal)
-      VALUES ($1, $2, $3, 1), ($4, $2, $3, 0)`, [mixed.id, org, restricted.id, hidden.id]);
     for (const actor of [owner, member]) {
       const listed = await catalog.list(actor, org);
       expect(listed.collections.find(item => item.id === mixed.id)?.documentIds).toEqual([common.id]);
@@ -271,8 +269,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     const updated = await catalog.write(owner, org, "collections", mixed.id, mixed.version, { name: mixed.name, description: "Updated description",
       status: "ACTIVE", allowedTypes: ["Guide"] }, "edit-common-folder");
     expect(updated.version).toBe(mixed.version + 1);
-    expect((await pool!.query("SELECT 1 FROM arden.knowledge_collection_document WHERE collection_id = $1 AND published_version_id = $2",
-      [mixed.id, restricted.id])).rowCount).toBe(1); // No unapproved legacy-link deletion.
+
   });
 
   it("hides Collection links after approved readers narrow, without denying a still-authorized normal reader", async () => {
@@ -290,7 +287,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     expect(await repo.getPublishedKnowledge(owner, org, common.id)).not.toBeNull();
     expect((await catalog.list(owner, org)).collections.find(item => item.id === folder.id)?.documentIds).toEqual([]);
     expect((await catalog.list(member, org)).collections.find(item => item.id === folder.id)).toBeUndefined();
-    expect((await pool!.query("SELECT collection_id FROM arden.knowledge_collection_placement WHERE shared_draft_id = $1", [common.draftId])).rows)
+    expect((await pool!.query("SELECT handbook_id AS collection_id FROM arden.handbook_placement WHERE document_id = $1", [common.draftId])).rows)
       .toEqual([{ collection_id: null }]);
   });
 
@@ -305,7 +302,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     const metadata = { type: "Guide" as const, version: "1.0", expirationDate: null, changeNote: "" };
     await repo.updateKnowledgeDraft(owner, org, id, 1, { management: metadata, targetReaders: { mode: "ORGANIZATION" } }, null, "legacy-save");
     // Trusted fixture setup only: simulate a draft saved by the previous application.
-    await pool!.query("UPDATE arden.shared_draft SET management = management || jsonb_build_object('topicId', $1::text) WHERE shared_draft_id = $2", [topic.id, id]);
+    await pool!.query("UPDATE arden.company_document SET metadata = metadata || jsonb_build_object('topicId', $1::text) WHERE id = $2", [topic.id, id]);
     const submitted = await repo.submitKnowledgeDraft(owner, org, id, 2, randomUUID(), "legacy-submit");
     if (submitted.kind !== "submitted") throw new Error("Legacy submission failed");
     expect(submitted.submission.management).not.toHaveProperty("topicId");
@@ -315,11 +312,11 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     let before: unknown;
     try {
       await fixture.query("BEGIN");
-      await fixture.query("ALTER TABLE arden.shared_submission DISABLE TRIGGER trg_freeze_submission_management");
-      before = (await fixture.query(`UPDATE arden.shared_submission SET management = management ||
-        jsonb_build_object('topicId', $1::text, 'topicName', $2::text) WHERE submission_id = $3 RETURNING management`,
+      await fixture.query("ALTER TABLE arden.review_submission DISABLE TRIGGER trg_freeze_submission_management");
+      before = (await fixture.query(`UPDATE arden.review_submission SET metadata = metadata ||
+        jsonb_build_object('topicId', $1::text, 'topicName', $2::text) WHERE id = $3 RETURNING metadata AS management`,
       [topic.id, topic.name, submitted.submission.id])).rows[0].management;
-      await fixture.query("ALTER TABLE arden.shared_submission ENABLE TRIGGER trg_freeze_submission_management");
+      await fixture.query("ALTER TABLE arden.review_submission ENABLE TRIGGER trg_freeze_submission_management");
       await fixture.query("COMMIT");
     } catch (error) { await fixture.query("ROLLBACK"); throw error; }
     finally { fixture.release(); }
@@ -327,7 +324,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       .toMatchObject({ kind: "updated", draft: { management: { version: "2.0" } } });
     expect((await repo.listKnowledgeSubmissions(owner, org))!.find(item => item.id === submitted.submission.id)?.management)
       .toMatchObject({ version: "1.0" });
-    expect((await pool!.query("SELECT management FROM arden.shared_submission WHERE submission_id = $1", [submitted.submission.id])).rows[0].management).toEqual(before);
+    expect((await pool!.query("SELECT metadata AS management FROM arden.review_submission WHERE id = $1", [submitted.submission.id])).rows[0].management).toEqual(before);
   });
 
   describe("P3B.2 Collection management API storage", () => {
@@ -350,7 +347,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       expect((await catalog.list(member, org)).collections.flatMap(item => item.documentIds)).not.toContain(source.id);
       expect(await repository!.getPublishedKnowledge(member, org, source.id)).not.toBeNull();
       expect((await pool!.query(`SELECT count(*) FROM arden.audit_event WHERE organization_id = $1
-        AND event_type = 'KNOWLEDGE_COLLECTION_PLACED' AND details_json->>'documentId' = $2`, [org, source.draftId])).rows[0].count).toBe("3");
+        AND event_type = 'KNOWLEDGE_COLLECTION_PLACED' AND details->>'documentId' = $2`, [org, source.draftId])).rows[0].count).toBe("3");
     });
 
     it("requires explicit allowed Types, rejects old bulk links, and archives without withdrawing", async () => {
@@ -397,85 +394,14 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     });
   });
 
-  describe("P3B.2 explicit legacy conversion and cleanup", () => {
-    // Publishes several real snapshots through review and activation; like the other publication
-    // paths in repository.integration.test.ts it needs more than the 5 s default on shared runners.
-    it("maps ambiguous legacy folders explicitly, removes only legacy links and preserves content/readers/history/Topics", async () => {
-      const common = await publishCollectionFixture({ mode: "ORGANIZATION" });
-      const restricted = await publishCollectionFixture({ mode: "DEPARTMENT", departmentId: department });
-      const newer = await publishCollectionFixture({ mode: "ORGANIZATION" });
-      const newerFolder = await collectionFolder("Newer explicit placement");
-      await repository!.knowledgeCatalog.place(owner, org, newer.draftId, 0, newerFolder.id, "newer-before-legacy");
-      const folders = (await pool!.query<{ id: string }>(`INSERT INTO arden.knowledge_collection (organization_id, name)
-        VALUES ($1, $2), ($1, $3) RETURNING collection_id AS id`, [org, `Legacy A ${randomUUID()}`, `Legacy B ${randomUUID()}`])).rows;
-      await pool!.query(`INSERT INTO arden.knowledge_collection_document (organization_id, collection_id, published_version_id, ordinal)
-        VALUES ($1, $2, $4, 0), ($1, $3, $4, 0), ($1, $2, $5, 1), ($1, $2, $6, 2)`,
-      [org, folders[0]!.id, folders[1]!.id, common.id, restricted.id, newer.id]);
-      const history = async () => (await pool!.query(`SELECT md5(coalesce(jsonb_agg(to_jsonb(pv) ORDER BY published_version_id)::text, '')) AS digest
-        FROM arden.published_knowledge_version pv WHERE shared_draft_id IN
-          (SELECT shared_draft_id FROM arden.shared_draft WHERE organization_id = $1)`, [org])).rows[0].digest;
-      const before = await history();
-      const client = await pool!.connect();
-      try {
-        const inventory = await inventoryCollectionLegacy(client, org);
-        const plan: CollectionLegacyPlan = { organizationId: org, fingerprint: inventory.fingerprint,
-          collections: inventory.collections.filter(item => item.allowedTypes === null).map(item => ({ id: item.id, allowedTypes: ["Guide"] })),
-          documents: [...new Set(inventory.links.map(item => item.documentId))].map(documentId => ({ documentId,
-            collectionId: documentId === common.draftId ? folders[0]!.id : documentId === newer.draftId ? newerFolder.id : null })) };
-        const result = await migrateCollectionLegacy(client, plan, ownerMembership);
-        expect(result.removedLinks).toBe(inventory.links.length);
-        expect((await inventoryCollectionLegacy(client, org)).links).toEqual([]);
-        await expect(migrateCollectionLegacy(client, plan, ownerMembership)).rejects.toThrow(/inventory changed/);
-        expect(await history()).toBe(before);
-        expect((await inventoryCollectionLegacy(client, org)).retainedTopics).toBe(inventory.retainedTopics);
-        expect(await repository!.knowledgeCatalog.getPlacement(owner, org, common.draftId)).toMatchObject({ collectionId: folders[0]!.id });
-        expect(await repository!.knowledgeCatalog.getPlacement(owner, org, newer.draftId)).toMatchObject({ collectionId: newerFolder.id, revision: 1 });
-        expect((await repository!.knowledgeCatalog.list(member, org)).collections.find(item => item.id === folders[0]!.id)?.documentIds).toEqual([common.id]);
-        expect(await repository!.getPublishedKnowledge(member, org, restricted.id)).toBeNull();
-        expect(await repository!.getPublishedKnowledge(owner, org, restricted.id)).not.toBeNull();
-      } finally { client.release(); }
-    }, 30_000);
-
-    it("refuses missing mappings and rolls back configuration, links and placements if the migration audit fails", async () => {
-      const common = await publishCollectionFixture({ mode: "ORGANIZATION" });
-      const folder = (await pool!.query<{ id: string }>(`INSERT INTO arden.knowledge_collection (organization_id, name)
-        VALUES ($1, $2) RETURNING collection_id AS id`, [org, `Rollback legacy ${randomUUID()}`])).rows[0]!;
-      await pool!.query(`INSERT INTO arden.knowledge_collection_document (organization_id, collection_id, published_version_id, ordinal)
-        VALUES ($1, $2, $3, 0)`, [org, folder.id, common.id]);
-      const client = await pool!.connect();
-      try {
-        const inventory = await inventoryCollectionLegacy(client, org);
-        const plan: CollectionLegacyPlan = { organizationId: org, fingerprint: inventory.fingerprint,
-          collections: [{ id: folder.id, allowedTypes: ["Guide"] }], documents: [{ documentId: common.draftId, collectionId: folder.id }] };
-        await expect(migrateCollectionLegacy(client, { ...plan, documents: [] }, ownerMembership)).rejects.toThrow(/exactly once/);
-        await pool!.query(`ALTER TABLE arden.audit_event ADD CONSTRAINT test_collection_migration_audit_failure
-          CHECK (organization_id <> '${org}'::uuid OR event_type <> 'KNOWLEDGE_COLLECTION_LEGACY_MIGRATED') NOT VALID`);
-        try { await expect(migrateCollectionLegacy(client, plan, ownerMembership)).rejects.toMatchObject({ code: "23514" }); }
-        finally { await pool!.query("ALTER TABLE arden.audit_event DROP CONSTRAINT test_collection_migration_audit_failure"); }
-        expect(await inventoryCollectionLegacy(client, org)).toEqual(inventory);
-        await expect(migrateCollectionLegacy(client, plan, memberId)).rejects.toThrow(/Admin attribution/);
-        const lateSource = await publishCollectionFixture({ mode: "ORGANIZATION" });
-        const writer = await pool!.connect();
-        let pending: Promise<unknown> | undefined;
-        try {
-          const pid = (await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]!.pid;
-          await writer.query("BEGIN");
-          await writer.query(`INSERT INTO arden.knowledge_collection_document (organization_id, collection_id, published_version_id, ordinal)
-            VALUES ($1, $2, $3, 1)`, [org, folder.id, lateSource.id]);
-          pending = migrateCollectionLegacy(client, plan, ownerMembership).then(() => null, error => error);
-          await vi.waitFor(async () => {
-            expect((await pool!.query("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", [pid])).rows[0].wait_event_type).toBe("Lock");
-          }, { timeout: 3000, interval: 20 });
-          await writer.query("COMMIT");
-          expect(await pending).toMatchObject({ message: "Legacy inventory changed; review a fresh plan" });
-        } finally { await writer.query("ROLLBACK"); await pending; writer.release(); }
-        const fresh = await inventoryCollectionLegacy(client, org);
-        expect(fresh.links).toHaveLength(2);
-        expect(fresh.collections.find(item => item.id === folder.id)?.allowedTypes).toBeNull();
-        await migrateCollectionLegacy(client, { ...plan, fingerprint: fresh.fingerprint,
-          documents: [...plan.documents, { documentId: lateSource.draftId, collectionId: folder.id }] }, ownerMembership);
-      } finally { client.release(); }
-    });
+  it("serves Handbooks from document placement after exact-version links are retired", async () => {
+    const storage = await pool!.query("SELECT to_regclass('arden.knowledge_collection_document') AS legacy");
+    expect(storage.rows).toEqual([{ legacy: null }]);
+    const common = await publishCollectionFixture({ mode: "ORGANIZATION" });
+    const folder = await collectionFolder("Operations Handbook");
+    await repository!.knowledgeCatalog.place(owner, org, common.draftId, 0, folder.id, "current-handbook");
+    expect((await repository!.knowledgeCatalog.list(member, org)).collections.find(item => item.id === folder.id)?.documentIds)
+      .toEqual([common.id]);
   });
 
   describe("P3B.1 flat-folder schema foundation", () => {
@@ -485,31 +411,31 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_roles owner ON owner.oid = p.proowner
         WHERE n.nspname = 'arden' AND p.proname = 'validate_collection_placement'`);
       expect(result.rows).toEqual([{ prosecdef: true, owner: "postgres", runtime_execute: false }]);
-      expect((await pool!.query("SELECT has_table_privilege('arden_runtime', 'arden.knowledge_current_publication', 'UPDATE') AS can_write")).rows)
+      expect((await pool!.query("SELECT has_table_privilege('arden_runtime', 'arden.current_publication', 'UPDATE') AS can_write")).rows)
         .toEqual([{ can_write: false }]);
     });
     it.each([{ value: [] }, { value: ["Unknown"] }, { value: ["Guide", "Guide"] }, { value: [null] },
       { value: [["Guide", "Procedure"]] }])("rejects invalid Allowed types $value", async ({ value: invalid }) => {
       const folder = await collectionFolder("Invalid types");
       await expect(runtimeCatalog(owner, true, client => client.query(
-        "UPDATE arden.knowledge_collection SET allowed_types = $2::text[] WHERE collection_id = $1", [folder.id, invalid])))
+        "UPDATE arden.handbook SET allowed_types = $2::text[] WHERE id = $1", [folder.id, invalid])))
         .rejects.toMatchObject({ code: "23514" });
     });
 
     it("enforces one folder, Admin-only writes, optimistic revisions and retained Unassigned tombstones", async () => {
       const source = await publishCollectionFixture({ mode: "ORGANIZATION" });
       const first = await collectionFolder("First"), second = await collectionFolder("Second");
-      const insert = (folderId: string) => runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.knowledge_collection_placement
-        (organization_id, shared_draft_id, collection_id) VALUES ($1, $2, $3) RETURNING placement_revision`, [org, source.draftId, folderId]));
+      const insert = (folderId: string) => runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.handbook_placement
+        (organization_id, document_id, handbook_id) VALUES ($1, $2, $3) RETURNING revision AS placement_revision`, [org, source.draftId, folderId]));
       expect((await insert(first.id)).rows[0].placement_revision).toBe("1");
       await expect(insert(second.id)).rejects.toMatchObject({ code: "23505" });
       for (const actor of [member, foreign]) {
         expect((await runtimeCatalog(actor, false, client => client.query(
-          "UPDATE arden.knowledge_collection_placement SET collection_id = NULL WHERE shared_draft_id = $1", [source.draftId]))).rowCount).toBe(0);
+          "UPDATE arden.handbook_placement SET handbook_id = NULL WHERE document_id = $1", [source.draftId]))).rowCount).toBe(0);
       }
-      expect((await runtimeCatalog(foreign, false, client => client.query("SELECT * FROM arden.knowledge_collection_placement"))).rows).toEqual([]);
-      const move = (revision: number, folderId: string | null) => runtimeCatalog(owner, true, client => client.query(`UPDATE arden.knowledge_collection_placement
-        SET collection_id = $2 WHERE shared_draft_id = $1 AND placement_revision = $3 RETURNING placement_revision`, [source.draftId, folderId, revision]));
+      expect((await runtimeCatalog(foreign, false, client => client.query("SELECT * FROM arden.handbook_placement"))).rows).toEqual([]);
+      const move = (revision: number, folderId: string | null) => runtimeCatalog(owner, true, client => client.query(`UPDATE arden.handbook_placement
+        SET handbook_id = $2 WHERE document_id = $1 AND revision = $3 RETURNING revision AS placement_revision`, [source.draftId, folderId, revision]));
       expect((await move(1, second.id)).rows[0].placement_revision).toBe("2");
       expect((await move(1, null)).rowCount).toBe(0);
       expect((await move(2, null)).rows[0].placement_revision).toBe("3");
@@ -517,7 +443,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       const racing = await Promise.all([move(4, first.id), move(4, null)]);
       expect(racing.map(result => result.rowCount).sort()).toEqual([0, 1]);
       await expect(runtimeCatalog(owner, true, client => client.query(
-        "DELETE FROM arden.knowledge_collection_placement WHERE shared_draft_id = $1", [source.draftId]))).rejects.toMatchObject({ code: "42501" });
+        "DELETE FROM arden.handbook_placement WHERE document_id = $1", [source.draftId]))).rejects.toMatchObject({ code: "42501" });
     });
 
     it("rejects restricted, unpublished, wrong-Type and cross-organization placement", async () => {
@@ -530,11 +456,11 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         requestId: "unpublished-collection" });
       if (unpublished.kind !== "created") throw new Error("Unpublished draft fixture failed");
       const wrong = await collectionFolder("Wrong type");
-      await runtimeCatalog(owner, true, client => client.query("UPDATE arden.knowledge_collection SET allowed_types = ARRAY['Procedure'] WHERE collection_id = $1", [wrong.id]));
+      await runtimeCatalog(owner, true, client => client.query("UPDATE arden.handbook SET allowed_types = ARRAY['Procedure'] WHERE id = $1", [wrong.id]));
       for (const [documentId, collectionId, organizationId] of [[source.draftId, folder.id, org], [unpublished.draft.id, folder.id, org], [randomUUID(), folder.id, org],
         [common.draftId, wrong.id, org], [common.draftId, folder.id, randomUUID()]]) {
-        await expect(runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.knowledge_collection_placement
-          (organization_id, shared_draft_id, collection_id) VALUES ($1, $2, $3)`, [organizationId, documentId, collectionId])))
+        await expect(runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.handbook_placement
+          (organization_id, document_id, handbook_id) VALUES ($1, $2, $3)`, [organizationId, documentId, collectionId])))
           .rejects.toMatchObject({ code: "23514" });
       }
     });
@@ -543,12 +469,12 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       for (const change of ["archive", "types"]) {
         const source = await publishCollectionFixture({ mode: "ORGANIZATION" });
         const folder = await collectionFolder("Detach");
-        await runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.knowledge_collection_placement
-          (organization_id, shared_draft_id, collection_id) VALUES ($1, $2, $3)`, [org, source.draftId, folder.id]));
+        await runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.handbook_placement
+          (organization_id, document_id, handbook_id) VALUES ($1, $2, $3)`, [org, source.draftId, folder.id]));
         await runtimeCatalog(owner, true, client => client.query(change === "archive"
-          ? "UPDATE arden.knowledge_collection SET status = 'INACTIVE' WHERE collection_id = $1"
-          : "UPDATE arden.knowledge_collection SET allowed_types = ARRAY['Procedure'] WHERE collection_id = $1", [folder.id]));
-        expect((await pool!.query("SELECT collection_id, placement_revision FROM arden.knowledge_collection_placement WHERE shared_draft_id = $1", [source.draftId])).rows)
+          ? "UPDATE arden.handbook SET status = 'INACTIVE' WHERE id = $1"
+          : "UPDATE arden.handbook SET allowed_types = ARRAY['Procedure'] WHERE id = $1", [folder.id]));
+        expect((await pool!.query("SELECT handbook_id AS collection_id, revision AS placement_revision FROM arden.handbook_placement WHERE document_id = $1", [source.draftId])).rows)
           .toEqual([{ collection_id: null, placement_revision: "2" }]);
         expect(await repository!.getPublishedKnowledge(member, org, source.id)).not.toBeNull();
       }
@@ -558,8 +484,8 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     it("follows eligible activated versions and detaches an incompatible replacement without rewriting history", async () => {
       const repo = repository!, source = await publishCollectionFixture({ mode: "ORGANIZATION" });
       const folder = await collectionFolder("Versions");
-      await runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.knowledge_collection_placement
-        (organization_id, shared_draft_id, collection_id) VALUES ($1, $2, $3)`, [org, source.draftId, folder.id]));
+      await runtimeCatalog(owner, true, client => client.query(`INSERT INTO arden.handbook_placement
+        (organization_id, document_id, handbook_id) VALUES ($1, $2, $3)`, [org, source.draftId, folder.id]));
       for (const [revision, type] of [[2, "Guide"], [3, "Procedure"]] as const) {
         const saved = await repo.updateKnowledgeDraft(owner, org, source.draftId, revision, { management: {
           type, version: `${revision}.0`, expirationDate: null, changeNote: "Updated controlled guidance" },
@@ -573,10 +499,10 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         expect(await repo.getPublishedKnowledge(member, org, id)).not.toBeNull();
         const visibleFolder = (await repo.knowledgeCatalog.list(member, org)).collections.find(item => item.id === folder.id);
         expect(visibleFolder?.documentIds ?? []).toEqual(type === "Guide" ? [id] : []);
-        const placement = (await pool!.query("SELECT collection_id FROM arden.knowledge_collection_placement WHERE shared_draft_id = $1", [source.draftId])).rows[0];
+        const placement = (await pool!.query("SELECT handbook_id AS collection_id FROM arden.handbook_placement WHERE document_id = $1", [source.draftId])).rows[0];
         expect(placement.collection_id).toBe(type === "Guide" ? folder.id : null);
       }
-      expect((await pool!.query("SELECT count(*) FROM arden.published_knowledge_version WHERE shared_draft_id = $1", [source.draftId])).rows[0].count).toBe("3");
+      expect((await pool!.query("SELECT count(*) FROM arden.published_version WHERE document_id = $1", [source.draftId])).rows[0].count).toBe("3");
     }, 30_000);
   });
 });

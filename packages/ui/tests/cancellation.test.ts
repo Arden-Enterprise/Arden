@@ -147,9 +147,10 @@ describe("explicit cancellation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect((screen.getByRole("textbox", { name: /^Work email/ }) as HTMLInputElement).value).toBe("");
     fireEvent.click(screen.getByRole("tab", { name: /Review permissions/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Team tag Optional" }), { target: { value: "Unsaved team" } });
+    fireEvent.click(screen.getByRole("button", { name: "Whole organization" }));
+    expect(screen.getByRole("button", { name: "Whole organization" }).getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect((screen.getByRole("textbox", { name: "Team tag Optional" }) as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "One department" }).getAttribute("aria-pressed")).toBe("true");
     expect(department).not.toHaveBeenCalled(); expect(invite).not.toHaveBeenCalled(); expect(reviewer).not.toHaveBeenCalled();
   });
 });

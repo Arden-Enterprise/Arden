@@ -462,6 +462,96 @@
       "filename": "0077_graph_monitor_projection.sql",
       "sha256": "4a671f9d37266a892310ef33dad2ea98f9481e5915ebe33fd7b56a4adf2fddbc",
       "rollout": "operator"
+    },
+    {
+      "id": "0078",
+      "filename": "0078_organization_direct_share_settings.sql",
+      "sha256": "08124246718eecdfb34914fd72eec18900118af88812bdb72ec82b40625b8ef5",
+      "rollout": "operator"
+    },
+    {
+      "id": "0079",
+      "filename": "0079_direct_share_setting_cutover.sql",
+      "sha256": "958daf5959a33934087472ffa4e78a79e6ba19ce49150e7f6dc1a116f33bf6e7",
+      "rollout": "operator"
+    },
+    {
+      "id": "0080",
+      "filename": "0080_retire_legacy_qa.sql",
+      "sha256": "d928ca2059576644739749b7d31c0b33b3145d81105334845757a758e5c59214",
+      "rollout": "operator"
+    },
+    {
+      "id": "0081",
+      "filename": "0081_target_readers_authoring_cutover.sql",
+      "sha256": "f5d9990b48a406d92b4e865b7d39d5488a2719b5ae949e2615d3284eff6c678f",
+      "rollout": "operator"
+    },
+    {
+      "id": "0082",
+      "filename": "0082_retire_legacy_categories_and_policies.sql",
+      "sha256": "666bc0b3d2b1a2259176f66a215314d3b96159b8c797131225b3ea1e00841ab4",
+      "rollout": "operator"
+    },
+    {
+      "id": "0083",
+      "filename": "0083_retire_legacy_audience_reads.sql",
+      "sha256": "e0c1046c5422e14e0306e497a05e4859d7e94ceb3174537da7b047360eedefd0",
+      "rollout": "operator"
+    },
+    {
+      "id": "0084",
+      "filename": "0084_retire_legacy_system_administration.sql",
+      "sha256": "b615281f782fd64ac9b27bb2daee9e5e224fa5092616e621424e2e8aa79e93b5",
+      "rollout": "operator"
+    },
+    {
+      "id": "0085",
+      "filename": "0085_consolidate_index_dispatch.sql",
+      "sha256": "0197edc7355e62612af2f25806e22b62a25b9c8c0970a0da86b5fb9d2b26f16a",
+      "rollout": "operator"
+    },
+    {
+      "id": "0086",
+      "filename": "0086_retire_audience_storage.sql",
+      "sha256": "94fa2d56f957bde011567e0ff158f44856d1e372071fab7848af738e36560b6c",
+      "rollout": "operator"
+    },
+    {
+      "id": "0087",
+      "filename": "0087_consolidate_maintenance_notifications.sql",
+      "sha256": "84a0b0288735d6d4149ce65389268dec13504b7f04d1b8b453a47c629ec551fe",
+      "rollout": "operator"
+    },
+    {
+      "id": "0088",
+      "filename": "0088_consolidate_maintenance_reports.sql",
+      "sha256": "f0b36831a9b086d423019ad800f1998436a14cfe76e1832d449588933f8359cb",
+      "rollout": "operator"
+    },
+    {
+      "id": "0089",
+      "filename": "0089_retire_legacy_collection_links.sql",
+      "sha256": "286c5e568916396675f3898915732490d192e15c83858edf6d1f610bb379beb3",
+      "rollout": "operator"
+    },
+    {
+      "id": "0090",
+      "filename": "0090_retire_team_project_fields.sql",
+      "sha256": "ca9bcbf1b87803d2e177970b31eeb3597c1327057850c4314b70097770d60a9f",
+      "rollout": "operator"
+    },
+    {
+      "id": "0091",
+      "filename": "0091_rename_schema_tables.sql",
+      "sha256": "597a4061649c12c084f66c7b57abb6bfba7004cf26e959671d24e40a39552e9a",
+      "rollout": "operator"
+    },
+    {
+      "id": "0092",
+      "filename": "0092_rename_schema_columns.sql",
+      "sha256": "8ddd54b158e4deea262d1c28c3173e254ba4166c2e47cb96108b71e6f6e7b1ee",
+      "rollout": "operator"
     }
   ]
 }

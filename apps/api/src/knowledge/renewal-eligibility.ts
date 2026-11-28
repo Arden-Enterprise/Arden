@@ -48,7 +48,7 @@ export async function computeCanRenewByDocument(
       SELECT g.scope, g.department_id
         FROM reviewer_grant g
        WHERE g.organization_id = $1
-         AND g.reviewer_membership_id = $2
+         AND g.reviewer_id = $2
          AND g.status = 'ACTIVE'
          AND g.valid_from <= now()
          AND (g.valid_until IS NULL OR g.valid_until > now())`,
@@ -78,10 +78,10 @@ export async function computeCanRenewByDocument(
     await client.query("SELECT set_config('arden.org_admin', 'true', true)");
     try {
       const pendingResult = await client.query<{ shared_draft_id: string }>(`
-        SELECT DISTINCT s.shared_draft_id
-          FROM shared_submission s
+        SELECT DISTINCT s.document_id AS shared_draft_id
+          FROM review_submission s
          WHERE s.organization_id = $1
-           AND s.shared_draft_id = ANY($2::uuid[])
+           AND s.document_id = ANY($2::uuid[])
            AND s.request_type = 'RENEWAL'
            AND s.status = 'PENDING_REVIEW'`,
       [input.organizationId, eligibleDocIds]);
@@ -94,19 +94,19 @@ export async function computeCanRenewByDocument(
       )];
       if (needAuthorActiveVersionIds.length > 0) {
         const activeResult = await client.query<{ published_version_id: string; author_active: boolean }>(`
-          SELECT pv.published_version_id,
+          SELECT pv.id AS published_version_id,
                  EXISTS (
                    SELECT 1
-                     FROM organization_membership om
-                     JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-                     JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-                    WHERE om.membership_id = COALESCE(pv.author_membership_id, sub.submitted_by_membership_id)
+                     FROM membership om
+                     JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+                     JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+                    WHERE om.id = COALESCE(pv.author_id, sub.submitted_by_id)
                       AND om.organization_id = $1
                       AND om.status = 'ACTIVE'
                  ) AS author_active
-            FROM published_knowledge_version pv
-            LEFT JOIN shared_submission sub ON sub.submission_id = pv.submission_id
-           WHERE pv.published_version_id = ANY($2::uuid[])`,
+            FROM published_version pv
+            LEFT JOIN review_submission sub ON sub.id = pv.review_submission_id
+           WHERE pv.id = ANY($2::uuid[])`,
         [input.organizationId, needAuthorActiveVersionIds]);
         for (const row of activeResult.rows) {
           adminAuthorActiveByVersion.set(row.published_version_id, row.author_active);
@@ -117,10 +117,10 @@ export async function computeCanRenewByDocument(
     }
   } else {
     const pendingResult = await client.query<{ shared_draft_id: string }>(`
-      SELECT DISTINCT s.shared_draft_id
-        FROM shared_submission s
+      SELECT DISTINCT s.document_id AS shared_draft_id
+        FROM review_submission s
        WHERE s.organization_id = $1
-         AND s.shared_draft_id = ANY($2::uuid[])
+         AND s.document_id = ANY($2::uuid[])
          AND s.request_type = 'RENEWAL'
          AND s.status = 'PENDING_REVIEW'`,
     [input.organizationId, eligibleDocIds]);

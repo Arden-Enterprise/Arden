@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { ActorRecord, AnchorRecord, CaseEventRecord, CaseRecord, LegacyReport, NotificationRecord, PublicationSubmission } from "./contracts.js";
+import type { ActorRecord, AnchorRecord, CaseEventRecord, CaseRecord, NotificationRecord, PublicationSubmission } from "./contracts.js";
 import { MaintenanceCaseService, type MaintenanceTx } from "./case-service.js";
 import { publicationProofFromPointer } from "./publication-proof.js";
 import { MaintenanceError, canonicalIds } from "./contracts.js";
@@ -17,8 +17,6 @@ class MemoryMaintenance {
   cases: CaseRecord[] = [];
   events: CaseEventRecord[] = [];
   notices: NotificationRecord[] = [];
-  imports = new Map<string, string>();
-  unmapped: LegacyReport[] = [];
   reads = new Set<string>();
   versions = new Map<string, { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null }>();
   proofs = new Map<string, { state: "pending" | "applicable" | "rejected" | "upcoming"; outcome: "UPDATED" | "WITHDRAWN" | null; publishedVersionId?: string | null }>();
@@ -88,15 +86,7 @@ class MemoryMaintenance {
       lockReaderIntake: async () => {},
       hasOpenReaderReport: async (documentId, reporterMembershipId) => this.cases.some((item) => item.organizationId === organizationId
         && item.documentId === documentId && item.reporterMembershipId === reporterMembershipId
-        && item.origin === "READER_REPORT" && item.reporterStatus !== "Resolved")
-        || this.unmapped.some((report) => report.documentId === documentId
-          && report.reporterMembershipId === reporterMembershipId && report.status === "OPEN"),
-      findImport: async (reportId) => this.imports.get(`${organizationId}:${reportId}`) ?? null,
-      saveImport: async (reportId, caseId) => {
-        this.imports.set(`${organizationId}:${reportId}`, caseId);
-        this.unmapped = this.unmapped.filter((item) => item.reportId !== reportId);
-      },
-      unmappedOpenReports: async () => this.unmapped,
+        && item.origin === "READER_REPORT" && item.reporterStatus !== "Resolved"),
       hasUnread: async (membershipId, caseId) => this.notices.some((item) => item.recipientMembershipId === membershipId
         && item.caseId === caseId && !this.reads.has(`${membershipId}:${caseId}`)),
       markRead: async (membershipId, caseId) => { this.reads.add(`${membershipId}:${caseId}`); },
@@ -148,7 +138,7 @@ describe("maintenance intake", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -232,7 +222,7 @@ describe("maintenance assignment", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -313,7 +303,7 @@ describe("version comparison access", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -369,7 +359,7 @@ describe("version comparison access", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "Onboarding PDF", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "Onboarding PDF", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -425,7 +415,7 @@ describe("publication proof", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -528,7 +518,7 @@ describe("bounded analysis", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -579,7 +569,7 @@ describe("bounded analysis", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -620,7 +610,7 @@ describe("case conversation", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -647,7 +637,7 @@ describe("review independence and private history", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -680,7 +670,7 @@ describe("related cases", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -727,7 +717,7 @@ describe("maintenance questions", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.grants.add(reviewer.membershipId);
@@ -757,14 +747,14 @@ describe("maintenance report cutover", () => {
     const memory = new MemoryMaintenance();
     memory.anchors.set(`${documentId}:${versionId}`, {
       organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
-      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept",
       authorMembershipId: author.membershipId,
     });
     memory.admins.add(reviewer.membershipId);
     return memory;
   }
 
-  it("keeps one open legacy report and imports an eligible row once", async () => {
+  it("keeps one open case for the legacy intake endpoint", async () => {
     const memory = setup();
     const reader = serviceFor(memory, reporter);
     await reader.acceptLegacyReport(reporter.userId, org, {
@@ -776,43 +766,12 @@ describe("maintenance report cutover", () => {
     expect(memory.cases).toHaveLength(1);
     expect(memory.notices.filter((item) => item.logicalKey.startsWith("submitted:"))).toHaveLength(1);
 
-    const openId = randomUUID();
-    const closedId = randomUUID();
-    const hiddenId = randomUUID();
-    const reports = [
-      { reportId: openId, documentId, publishedVersionId: versionId, reporterMembershipId: author.membershipId,
-        message: "Old open report", createdAt: "2026-11-01T00:00:00.000Z", status: "OPEN" as const, verifiable: true },
-      { reportId: closedId, documentId, publishedVersionId: versionId, reporterMembershipId: author.membershipId,
-        message: "Already closed", createdAt: "2026-10-01T00:00:00.000Z", status: "CLOSED" as const, verifiable: true },
-      { reportId: hiddenId, documentId, publishedVersionId: versionId, reporterMembershipId: author.membershipId,
-        message: "Missing pin", createdAt: "2026-10-02T00:00:00.000Z", status: "OPEN" as const, verifiable: false },
-    ];
-    const admin = serviceFor(memory, reviewer);
-    const imported = await admin.importReports(reviewer.userId, org, reports);
-    const again = await admin.importReports(reviewer.userId, org, reports);
-    expect(imported.retained).toEqual([closedId]);
-    expect(imported.held).toEqual([hiddenId]);
-    expect(imported.imported).toHaveLength(1);
-    expect(again.imported).toEqual(imported.imported);
-    expect(memory.cases).toHaveLength(2);
-    expect(memory.events.filter((item) => item.eventType === "IMPORTED")).toHaveLength(1);
-    expect(memory.notices.filter((item) => item.caseId === imported.imported[0]?.caseId)).toHaveLength(0);
-    await expect(serviceFor(memory, reporter).importReports(reporter.userId, org, reports)).rejects.toMatchObject({ code: "DENIED" });
   });
 
-  it("imports the unmapped open rows an operator can read, and the same wording after closure starts a new case", async () => {
+  it("acknowledges the completed migration for an admin and accepts repeat reports after closure", async () => {
     const memory = setup();
-    const openId = randomUUID();
-    memory.unmapped = [{
-      reportId: openId, documentId, publishedVersionId: versionId, reporterMembershipId: author.membershipId,
-      message: "Still listed", createdAt: "2026-11-02T00:00:00.000Z", status: "OPEN", verifiable: true,
-    }];
     const admin = serviceFor(memory, reviewer);
-    const imported = await admin.importOpenReports(reviewer.userId, org);
-    const again = await admin.importOpenReports(reviewer.userId, org);
-    expect(imported.imported).toEqual([{ reportId: openId, caseId: imported.imported[0]?.caseId }]);
-    expect(again.imported).toEqual([]);
-    expect(memory.cases).toHaveLength(1);
+    await expect(admin.importOpenReports(reviewer.userId, org)).resolves.toEqual({ imported: [], retained: [], held: [] });
     await expect(serviceFor(memory, reporter).importOpenReports(reporter.userId, org)).rejects.toMatchObject({ code: "DENIED" });
 
     const reader = serviceFor(memory, reporter);

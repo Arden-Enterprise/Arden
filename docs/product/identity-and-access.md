@@ -190,6 +190,8 @@ Paths:
 | F03-SHR-AC8 | Share and revoke write audit events without title or content; the recipient gets one in-app notice per share; repeated sharing to the same person does not duplicate the grant or notice. | `notify_private_item_share` (SECURITY DEFINER, added to the owner-repair inventory) and audit events. | Real-PostgreSQL case (one notice per grant, none on repeat, audit without title); notification route test (details hidden after revocation); browser (two notices opened the reader). | Realtime delivery not checked (local Realtime off) |
 | F03-SHR-AC9 | Network/server failures show explicit errors without partial grants; the panel works by keyboard and at phone width on web and desktop; the desktop allow-list permits exactly the new routes. | Explicit errors in the panel; desktop allow-list routes. | UI tests; desktop policy test. Phone width and Electron not run. | Phone width, Electron |
 
+Storage migrations for F03-SHR-AC6 move the read path to Organization in `0078` and the writer in `0079`. The new SQL writer checks the actor's active Org Admin role and writes the audit event in the same transaction. The cutover drops the old settings table only after the copied values match. [Migration plan and local verification](../engineering/schema-54-migration-plan.md#kết-quả-rehearsal-local)
+
 ### F03-FILE Private PDF items
 
 - Spec revision/date: 1 / 2026-11-26. Decision state: **accepted** ([ADR 0034](../decisions/0034-share-button-direct-share-and-private-pdf.md)); it replaces the F03-PDF rule that the PDF file is never stored. Same provenance, baseline and delivery state as F03-SHR.

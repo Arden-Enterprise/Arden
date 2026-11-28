@@ -106,32 +106,25 @@ describe.skipIf(!databaseUrl)("Isolated System Admin identity with real PostgreS
     }
   });
 
-  it("opens setup on an upgraded install with a legacy manager, then closes it permanently", async () => {
-    const legacyUser = randomUUID();
-    await admin!.query("INSERT INTO arden.user_account (user_id, email, full_name) VALUES ($1, $2, 'Legacy Admin')",
-      [legacyUser, `${legacyUser}@example.test`]);
-    await admin!.query(`INSERT INTO arden.system_administrator (user_id, status, can_manage_system_admins)
-      VALUES ($1, 'ACTIVE', true)`, [legacyUser]);
-    try {
-      expect((await services.auth.setupStatus()).needsInitialSetup).toBe(true);
-      const created = await services.auth.completeInitialSetup({ email: `first-${suffix}@arden.test`, fullName: "First Manager",
-        passwordHash: `scrypt$32768$8$1$${"0".repeat(32)}$${"1".repeat(128)}`, requestId: "it-setup",
-        sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000) });
-      expect(created.account.canManageSystemAdmins).toBe(true);
-      expect((await services.auth.setupStatus()).needsInitialSetup).toBe(false);
-      await expect(services.auth.completeInitialSetup({ email: `second-${suffix}@arden.test`, fullName: "Second",
-        passwordHash: `scrypt$32768$8$1$${"0".repeat(32)}$${"1".repeat(128)}`, requestId: "it-setup-2",
-        sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000) })).rejects.toMatchObject({ code: "SYSTEM_SETUP_ALREADY_COMPLETED" });
-      const active = await services.auth.getActiveSession(created.session.sessionId);
-      expect(active?.account.id).toBe(created.account.id);
-    } finally {
-      await admin!.query("DELETE FROM arden.system_administrator WHERE user_id = $1", [legacyUser]).catch(() => undefined);
-      await admin!.query("DELETE FROM arden.user_account WHERE user_id = $1", [legacyUser]).catch(() => undefined);
-    }
+  it("uses only isolated administrator records and closes initial setup permanently", async () => {
+    const retired = await admin!.query(`SELECT to_regclass('arden.system_administrator') AS administrators,
+      to_regclass('arden.system_administration_event') AS events`);
+    expect(retired.rows).toEqual([{ administrators: null, events: null }]);
+    expect((await services.auth.setupStatus()).needsInitialSetup).toBe(true);
+    const created = await services.auth.completeInitialSetup({ email: `first-${suffix}@arden.test`, fullName: "First Manager",
+      passwordHash: `scrypt$32768$8$1$${"0".repeat(32)}$${"1".repeat(128)}`, requestId: "it-setup",
+      sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000) });
+    expect(created.account.canManageSystemAdmins).toBe(true);
+    expect((await services.auth.setupStatus()).needsInitialSetup).toBe(false);
+    await expect(services.auth.completeInitialSetup({ email: `second-${suffix}@arden.test`, fullName: "Second",
+      passwordHash: `scrypt$32768$8$1$${"0".repeat(32)}$${"1".repeat(128)}`, requestId: "it-setup-2",
+      sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000) })).rejects.toMatchObject({ code: "SYSTEM_SETUP_ALREADY_COMPLETED" });
+    const active = await services.auth.getActiveSession(created.session.sessionId);
+    expect(active?.account.id).toBe(created.account.id);
   });
 
   it("runs the manager lifecycle on isolated identities and protects the last manager", async () => {
-    const first = (await admin!.query<{ admin_id: string }>("SELECT admin_id FROM arden_system.administrator WHERE email = $1",
+    const first = (await admin!.query<{ admin_id: string }>("SELECT id AS admin_id FROM arden_system.administrator WHERE email = $1",
       [`first-${suffix}@arden.test`])).rows[0]!.admin_id;
     const firstSession = await services.auth.startSession(first, "it-sign-in", new Date(Date.now() + 60 * 60 * 1000));
     const manager = { adminId: first, sessionId: firstSession.sessionId };
@@ -170,7 +163,7 @@ describe.skipIf(!databaseUrl)("Isolated System Admin identity with real PostgreS
   });
 
   it("serves paginated aggregate Console reports only through an active isolated session", async () => {
-    const first = (await admin!.query<{ admin_id: string }>("SELECT admin_id FROM arden_system.administrator WHERE email = $1",
+    const first = (await admin!.query<{ admin_id: string }>("SELECT id AS admin_id FROM arden_system.administrator WHERE email = $1",
       [`first-${suffix}@arden.test`])).rows[0]!.admin_id;
     const session = await services.auth.startSession(first, "it-console", new Date(Date.now() + 60 * 60 * 1000));
     const actor = { adminId: first, sessionId: session.sessionId };
@@ -203,7 +196,7 @@ describe.skipIf(!databaseUrl)("Isolated System Admin identity with real PostgreS
     expect((await services.auth.throttleState("sign-in", key))?.retryAfterSeconds).toBeGreaterThan(0);
     await services.auth.clearThrottle("sign-in", key);
     expect(await services.auth.throttleState("sign-in", key)).toBeNull();
-    const stored = await admin!.query<{ bucket: string }>("SELECT bucket FROM arden_system.auth_throttle");
+    const stored = await admin!.query<{ bucket: string }>("SELECT bucket_key AS bucket FROM arden_system.auth_throttle");
     expect(stored.rows.every((row) => !row.bucket.includes("@"))).toBe(true);
   });
 
@@ -219,7 +212,7 @@ describe.skipIf(!databaseUrl)("Isolated System Admin identity with real PostgreS
     expect(await repository.recordAiUsageEvents(member, organizationId, requestId, events)).toBe(true);
     expect(await repository.recordAiUsageEvents(member, organizationId, requestId, events)).toBe(true);
     const stored = await admin!.query<{ count: string; incomplete: string }>(`SELECT count(*)::text AS count,
-      count(*) FILTER (WHERE NOT usage_complete)::text AS incomplete FROM arden.ai_usage_event WHERE request_id = $1`, [requestId]);
+      count(*) FILTER (WHERE NOT is_complete)::text AS incomplete FROM arden.ai_usage WHERE request_id = $1`, [requestId]);
     expect(stored.rows[0]).toEqual({ count: "2", incomplete: "1" });
 
     expect(await repository.recordAiAnswerResult(member, organizationId, requestId, "READER_QUESTION", "ANSWERED", 1)).toBe(true);

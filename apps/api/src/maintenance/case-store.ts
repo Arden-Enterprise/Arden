@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import type {
-  ActorRecord, AnchorRecord, CaseEventRecord, CaseRecord, LegacyReport, NotificationRecord, PublicationProof, PublicationSubmission,
+  ActorRecord, AnchorRecord, CaseEventRecord, CaseRecord, NotificationRecord, PublicationProof, PublicationSubmission,
 } from "./contracts.js";
 import { publicationProofFromPointer, type PublicationPointer } from "./publication-proof.js";
 import type { AnalysisFinding, AnalysisRun, AnalysisState } from "./analysis.js";
@@ -12,13 +12,13 @@ import { visibleVersionText } from "./version-text.js";
 type MemberTransaction = <T>(userId: string, organizationId: string, work: (client: PoolClient) => Promise<T>) => Promise<T>;
 
 type CaseRow = {
-  case_id: string; organization_id: string; origin: CaseRecord["origin"]; reporter_membership_id: string | null;
+  id: string; organization_id: string; origin: CaseRecord["origin"]; reporter_id: string | null;
   document_id: string; published_version_id: string; content_hash: string; title: string; description: string;
-  anchor_page: number | null; anchor_passage: string | null; route_department_id: string;
-  classification: CaseRecord["classification"]; team_tag: string | null; project_tag: string | null;
-  author_membership_id: string; assignee_membership_id: string | null; reporter_status: CaseRecord["reporterStatus"];
+  anchor_page: number | null; anchor_passage: string | null; review_department_id: string;
+  classification: CaseRecord["classification"];
+  author_id: string; assignee_id: string | null; reporter_status: CaseRecord["reporterStatus"];
   outcome: CaseRecord["outcome"]; reporter_explanation: string | null; reviewer_rationale: string | null;
-  publication_link_version_id: string | null; publication_link_submission_id: string | null; publication_link_reason: string | null;
+  remedy_version_id: string | null; remedy_request_id: string | null; remedy_reason: string | null;
   revision: number; first_claimed_at: Date | null; created_at: Date; resolved_at: Date | null;
 };
 
@@ -36,26 +36,24 @@ function mapAnalysis(row: AnalysisRow): AnalysisRun {
 
 function mapCase(row: CaseRow): CaseRecord {
   return {
-    caseId: row.case_id, organizationId: row.organization_id, origin: row.origin,
-    reporterMembershipId: row.reporter_membership_id, documentId: row.document_id,
+    caseId: row.id, organizationId: row.organization_id, origin: row.origin,
+    reporterMembershipId: row.reporter_id, documentId: row.document_id,
     publishedVersionId: row.published_version_id, contentHash: row.content_hash, title: row.title,
     description: row.description, anchorPage: row.anchor_page, anchorPassage: row.anchor_passage,
-    routeDepartmentId: row.route_department_id, classification: row.classification, teamTag: row.team_tag,
-    projectTag: row.project_tag, authorMembershipId: row.author_membership_id,
-    assigneeMembershipId: row.assignee_membership_id, reporterStatus: row.reporter_status, outcome: row.outcome,
+    routeDepartmentId: row.review_department_id, classification: row.classification, authorMembershipId: row.author_id,
+    assigneeMembershipId: row.assignee_id, reporterStatus: row.reporter_status, outcome: row.outcome,
     reporterExplanation: row.reporter_explanation, reviewerRationale: row.reviewer_rationale,
-    publicationLinkVersionId: row.publication_link_version_id, publicationLinkSubmissionId: row.publication_link_submission_id,
-    publicationLinkReason: row.publication_link_reason,
+    publicationLinkVersionId: row.remedy_version_id, publicationLinkSubmissionId: row.remedy_request_id,
+    publicationLinkReason: row.remedy_reason,
     revision: row.revision,
     firstClaimedAt: row.first_claimed_at?.toISOString() ?? null, createdAt: row.created_at.toISOString(),
     resolvedAt: row.resolved_at?.toISOString() ?? null,
   };
 }
 
-const caseColumns = `case_id, organization_id, origin, reporter_membership_id, document_id, published_version_id,
-  content_hash, title, description, anchor_page, anchor_passage, route_department_id, classification, team_tag,
-  project_tag, author_membership_id, assignee_membership_id, reporter_status, outcome, reporter_explanation,
-  reviewer_rationale, publication_link_version_id, publication_link_submission_id, publication_link_reason, revision, first_claimed_at, created_at, resolved_at`;
+const caseColumns = `id, organization_id, origin, reporter_id, document_id, published_version_id,
+  content_hash, title, description, anchor_page, anchor_passage, review_department_id, classification, author_id, assignee_id, reporter_status, outcome, reporter_explanation,
+  reviewer_rationale, remedy_version_id, remedy_request_id, remedy_reason, revision, first_claimed_at, created_at, resolved_at`;
 
 export type VersionContentReader = {
   read(sourceUri: string, expectedHash: string): Promise<string>;
@@ -84,10 +82,10 @@ class PgMaintenanceTx implements MaintenanceTx {
 
   async actor(): Promise<ActorRecord | null> {
     const result = await this.client.query<{ membership_id: string; user_id: string; organization_id: string }>(`
-      SELECT om.membership_id, om.user_id, om.organization_id
-        FROM organization_membership om
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-       WHERE om.organization_id = $1 AND om.user_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid
+      SELECT om.id AS membership_id, om.account_id AS user_id, om.organization_id
+        FROM membership om
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+       WHERE om.organization_id = $1 AND om.account_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid
          AND om.status = 'ACTIVE'`, [this.organizationId]);
     const row = result.rows[0];
     return row ? { userId: row.user_id, organizationId: row.organization_id, membershipId: row.membership_id } : null;
@@ -96,30 +94,29 @@ class PgMaintenanceTx implements MaintenanceTx {
   async readAnchor(documentId: string, publishedVersionId: string): Promise<AnchorRecord | null> {
     const result = await this.client.query<{
       organization_id: string; document_id: string; published_version_id: string; content_hash: string; title: string;
-      classification: AnchorRecord["classification"]; responsible_department_id: string; team_tag: string | null;
-      project_tag: string | null; author_membership_id: string;
+      classification: AnchorRecord["classification"]; responsible_department_id: string; author_membership_id: string;
     }>(`
-      SELECT cp.organization_id, pv.shared_draft_id AS document_id, pv.published_version_id, pv.content_hash, pv.title,
-             pv.classification, pv.responsible_department_id, pv.team_tag, pv.project_tag, pv.author_membership_id
-        FROM published_knowledge_version pv
-        JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
-       WHERE pv.published_version_id = $1 AND pv.shared_draft_id = $2 AND cp.organization_id = $3`,
+      SELECT cp.organization_id, pv.document_id AS document_id, pv.id AS published_version_id, pv.content_hash, pv.title,
+             pv.classification, pv.owner_department_id AS responsible_department_id, pv.author_id AS author_membership_id
+        FROM published_version pv
+        JOIN current_publication cp ON cp.published_version_id = pv.id
+       WHERE pv.id = $1 AND pv.document_id = $2 AND cp.organization_id = $3`,
     [publishedVersionId, documentId, this.organizationId]);
     const row = result.rows[0];
     if (!row?.classification || !row.responsible_department_id) return null;
     return {
       organizationId: row.organization_id, documentId: row.document_id, publishedVersionId: row.published_version_id,
       contentHash: row.content_hash, title: row.title, classification: row.classification,
-      departmentId: row.responsible_department_id, teamTag: row.team_tag, projectTag: row.project_tag,
+      departmentId: row.responsible_department_id,
       authorMembershipId: row.author_membership_id,
     };
   }
 
   async canReadDocument(documentId: string): Promise<boolean> {
     // Runs under the caller's publication RLS: true only when they can read the document's current publication.
-    const result = await this.client.query(`SELECT 1 FROM knowledge_current_publication cp
-      JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
-      WHERE cp.shared_draft_id = $1 AND cp.organization_id = $2`, [documentId, this.organizationId]);
+    const result = await this.client.query(`SELECT 1 FROM current_publication cp
+      JOIN published_version pv ON pv.id = cp.published_version_id
+      WHERE cp.document_id = $1 AND cp.organization_id = $2`, [documentId, this.organizationId]);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -154,25 +151,25 @@ class PgMaintenanceTx implements MaintenanceTx {
 
   async idempotency(membershipId: string, requestKey: string) {
     const result = await this.client.query<{ payload_hash: string; case_id: string }>(`
-      SELECT payload_hash, case_id FROM maintenance_idempotency
-       WHERE organization_id = $1 AND actor_membership_id = $2 AND request_key = $3`,
+      SELECT payload_hash, case_id FROM case_intake_key
+       WHERE organization_id = $1 AND actor_id = $2 AND idempotency_key = $3`,
     [this.organizationId, membershipId, requestKey]);
     const row = result.rows[0];
     return row ? { payloadHash: row.payload_hash, caseId: row.case_id } : null;
   }
 
   async saveIdempotency(membershipId: string, requestKey: string, payloadHash: string, caseId: string) {
-    await this.client.query(`INSERT INTO maintenance_idempotency
-      (organization_id, actor_membership_id, request_key, payload_hash, case_id)
+    await this.client.query(`INSERT INTO case_intake_key
+      (organization_id, actor_id, idempotency_key, payload_hash, case_id)
       VALUES ($1, $2, $3, $4, $5)`, [this.organizationId, membershipId, requestKey, payloadHash, caseId]);
   }
 
   async insertCase(row: CaseRecord) {
     await this.client.query(`INSERT INTO maintenance_case (${caseColumns}) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
     [row.caseId, row.organizationId, row.origin, row.reporterMembershipId, row.documentId, row.publishedVersionId,
       row.contentHash, row.title, row.description, row.anchorPage, row.anchorPassage, row.routeDepartmentId,
-      row.classification, row.teamTag, row.projectTag, row.authorMembershipId, row.assigneeMembershipId,
+      row.classification, row.authorMembershipId, row.assigneeMembershipId,
       row.reporterStatus, row.outcome, row.reporterExplanation, row.reviewerRationale,
       row.publicationLinkVersionId, row.publicationLinkSubmissionId, row.publicationLinkReason, row.revision,
       row.firstClaimedAt, row.createdAt, row.resolvedAt]);
@@ -180,14 +177,14 @@ class PgMaintenanceTx implements MaintenanceTx {
 
   async lockCase(caseId: string): Promise<CaseRecord | null> {
     const result = await this.client.query<CaseRow>(`SELECT ${caseColumns} FROM maintenance_case
-      WHERE case_id = $1 AND organization_id = $2 FOR UPDATE`, [caseId, this.organizationId]);
+      WHERE id = $1 AND organization_id = $2 FOR UPDATE`, [caseId, this.organizationId]);
     const row = result.rows[0];
     return row ? mapCase(row) : null;
   }
 
   async listCases(): Promise<CaseRecord[]> {
     const result = await this.client.query<CaseRow>(`SELECT ${caseColumns} FROM maintenance_case
-      WHERE organization_id = $1 ORDER BY created_at, case_id`, [this.organizationId]);
+      WHERE organization_id = $1 ORDER BY created_at, id`, [this.organizationId]);
     return result.rows.map(mapCase);
   }
 
@@ -198,8 +195,8 @@ class PgMaintenanceTx implements MaintenanceTx {
   }
 
   async insertEvent(event: CaseEventRecord) {
-    await this.client.query(`INSERT INTO maintenance_case_event
-      (event_id, organization_id, case_id, sequence, actor_membership_id, event_type, audience, message, occurred_at)
+    await this.client.query(`INSERT INTO case_event
+      (id, organization_id, case_id, sequence, actor_id, event_type, visibility, message, occurred_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [event.eventId, event.organizationId, event.caseId, event.sequence, event.actorMembershipId,
       event.eventType, event.audience, event.message, event.occurredAt]);
@@ -209,8 +206,8 @@ class PgMaintenanceTx implements MaintenanceTx {
     const result = await this.client.query<{
       event_id: string; organization_id: string; case_id: string; sequence: string; actor_membership_id: string | null;
       event_type: CaseEventRecord["eventType"]; audience: CaseEventRecord["audience"]; message: string; occurred_at: Date;
-    }>(`SELECT event_id, organization_id, case_id, sequence, actor_membership_id, event_type, audience, message, occurred_at
-      FROM maintenance_case_event WHERE case_id = $1 AND organization_id = $2 AND sequence > $3
+    }>(`SELECT id AS event_id, organization_id, case_id, sequence, actor_id AS actor_membership_id, event_type, visibility AS audience, message, occurred_at
+      FROM case_event WHERE case_id = $1 AND organization_id = $2 AND sequence > $3
       ORDER BY sequence LIMIT $4`, [caseId, this.organizationId, afterSequence, limit]);
     return result.rows.map((row) => ({
       eventId: row.event_id, organizationId: row.organization_id, caseId: row.case_id, sequence: Number(row.sequence),
@@ -220,21 +217,18 @@ class PgMaintenanceTx implements MaintenanceTx {
   }
 
   async saveCase(row: CaseRecord) {
-    await this.client.query(`UPDATE maintenance_case SET assignee_membership_id = $3, reporter_status = $4,
-      outcome = $5, reporter_explanation = $6, reviewer_rationale = $7, publication_link_version_id = $8,
-      publication_link_submission_id = $9, publication_link_reason = $10, revision = $11, first_claimed_at = $12,
-      resolved_at = $13 WHERE case_id = $1 AND organization_id = $2`,
+    await this.client.query(`UPDATE maintenance_case SET assignee_id = $3, reporter_status = $4,
+      outcome = $5, reporter_explanation = $6, reviewer_rationale = $7, remedy_version_id = $8,
+      remedy_request_id = $9, remedy_reason = $10, revision = $11, first_claimed_at = $12,
+      resolved_at = $13 WHERE id = $1 AND organization_id = $2`,
     [row.caseId, row.organizationId, row.assigneeMembershipId, row.reporterStatus, row.outcome,
       row.reporterExplanation, row.reviewerRationale, row.publicationLinkVersionId, row.publicationLinkSubmissionId,
       row.publicationLinkReason, row.revision, row.firstClaimedAt, row.resolvedAt]);
   }
 
   async insertNotification(notice: NotificationRecord) {
-    await this.client.query(`INSERT INTO maintenance_notification
-      (notification_id, organization_id, case_id, recipient_membership_id, logical_key, message)
-      VALUES ($1,$2,$3,$4,$5,$6)`,
-    [notice.notificationId, notice.organizationId, notice.caseId, notice.recipientMembershipId,
-      notice.logicalKey, notice.message]);
+    await this.client.query(`SELECT enqueue_maintenance_case_notice($1,$2,$3,$4,$5)`,
+      [notice.notificationId, notice.caseId, notice.recipientMembershipId, notice.logicalKey, notice.message]);
   }
 
 
@@ -259,54 +253,18 @@ class PgMaintenanceTx implements MaintenanceTx {
   async hasOpenReaderReport(documentId: string, reporterMembershipId: string): Promise<boolean> {
     const result = await this.client.query<{ has_open: boolean }>(`SELECT EXISTS (
       SELECT 1 FROM maintenance_case
-      WHERE organization_id = $1 AND document_id = $2 AND reporter_membership_id = $3
+      WHERE organization_id = $1 AND document_id = $2 AND reporter_id = $3
         AND origin = 'READER_REPORT' AND reporter_status <> 'Resolved'
-    ) OR maintenance_has_unmapped_open_reader_report($2) AS has_open`,
+    ) AS has_open`,
     [this.organizationId, documentId, reporterMembershipId]);
     return result.rows[0]?.has_open ?? false;
   }
 
-  async findImport(reportId: string): Promise<string | null> {
-    const result = await this.client.query<{ case_id: string }>(`SELECT case_id FROM maintenance_report_import
-      WHERE organization_id = $1 AND report_id = $2`, [this.organizationId, reportId]);
-    return result.rows[0]?.case_id ?? null;
-  }
-
-  async saveImport(reportId: string, caseId: string): Promise<void> {
-    await this.client.query(`INSERT INTO maintenance_report_import (organization_id, report_id, case_id)
-      VALUES ($1, $2, $3)`, [this.organizationId, reportId, caseId]);
-  }
-
-  async unmappedOpenReports(after: { createdAt: string; reportId: string } | null): Promise<LegacyReport[]> {
-    const result = await this.client.query<{
-      report_id: string; shared_draft_id: string; published_version_id: string; reporter_membership_id: string;
-      message: string; created_at: Date; verifiable: boolean; title: string | null; content_hash: string | null;
-      classification: AnchorRecord["classification"] | null; responsible_department_id: string | null;
-      team_tag: string | null; project_tag: string | null; author_membership_id: string | null; cursor_at: string;
-    }>(`SELECT report_id, shared_draft_id, published_version_id, reporter_membership_id, message, created_at, verifiable,
-        title, content_hash, classification, responsible_department_id, team_tag, project_tag, author_membership_id,
-        created_at::text AS cursor_at
-      FROM list_unmapped_open_publication_reports($1::timestamptz, $2)`, [after?.createdAt ?? null, after?.reportId ?? null]);
-    return result.rows.map((row) => ({
-      reportId: row.report_id, documentId: row.shared_draft_id, publishedVersionId: row.published_version_id,
-      reporterMembershipId: row.reporter_membership_id, message: row.message,
-      createdAt: row.created_at.toISOString(), status: "OPEN", verifiable: row.verifiable, cursor: row.cursor_at,
-      anchor: row.verifiable ? {
-        organizationId: this.organizationId, documentId: row.shared_draft_id, publishedVersionId: row.published_version_id,
-        contentHash: row.content_hash ?? "", title: row.title ?? "", classification: row.classification!,
-        departmentId: row.responsible_department_id!, teamTag: row.team_tag, projectTag: row.project_tag,
-        authorMembershipId: row.author_membership_id!,
-      } : null,
-    }));
-  }
-
   async hasUnread(membershipId: string, caseId: string): Promise<boolean> {
-    const result = await this.client.query(`SELECT 1 FROM maintenance_notification n
-      WHERE n.organization_id = $1 AND n.case_id = $2 AND n.recipient_membership_id = $3
-        AND NOT EXISTS (
-          SELECT 1 FROM maintenance_notification_receipt r
-           WHERE r.notification_id = n.notification_id AND r.recipient_membership_id = n.recipient_membership_id
-        )`, [this.organizationId, caseId, membershipId]);
+    const result = await this.client.query(`SELECT 1 FROM notification
+      WHERE organization_id = $1 AND resource_id = $2 AND recipient_id = $3
+        AND event_type = 'MAINTENANCE_CASE_UPDATED' AND read_at IS NULL LIMIT 1`,
+    [this.organizationId, caseId, membershipId]);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -366,12 +324,12 @@ class PgMaintenanceTx implements MaintenanceTx {
       document_id: string; request_type: PublicationSubmission["requestType"]; status: string;
       produced_version_id: string | null; target_published_version_id: string | null; withdrawn: boolean;
     }>(`
-      SELECT s.shared_draft_id AS document_id, s.request_type, s.status, s.target_published_version_id,
-             (SELECT pv.published_version_id FROM published_knowledge_version pv
-               WHERE pv.submission_id = s.submission_id ORDER BY pv.version_no DESC LIMIT 1) AS produced_version_id,
+      SELECT s.document_id AS document_id, s.request_type, s.status, s.target_published_version_id,
+             (SELECT pv.id AS published_version_id FROM published_version pv
+               WHERE pv.review_submission_id = s.id ORDER BY pv.version_no DESC LIMIT 1) AS produced_version_id,
              s.publication_state = 'WITHDRAWN' AS withdrawn
-        FROM shared_submission s
-       WHERE s.submission_id = $1 AND s.organization_id = $2`, [submissionId, this.organizationId]);
+        FROM review_submission s
+       WHERE s.id = $1 AND s.organization_id = $2`, [submissionId, this.organizationId]);
     const row = result.rows[0];
     return row ? {
       documentId: row.document_id, requestType: row.request_type, status: row.status,
@@ -408,44 +366,44 @@ class PgMaintenanceTx implements MaintenanceTx {
 
   async saveLink(caseId: string, relatedCaseId: string): Promise<void> {
     const [left, right] = [caseId, relatedCaseId].sort();
-    await this.client.query(`INSERT INTO maintenance_case_link (organization_id, left_case_id, right_case_id)
+    await this.client.query(`INSERT INTO case_link (organization_id, left_case_id, right_case_id)
       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [this.organizationId, left, right]);
   }
 
   async activeAnalysis(caseId: string): Promise<boolean> {
-    const result = await this.client.query(`SELECT 1 FROM maintenance_analysis_run
-      WHERE organization_id = $1 AND case_id = $2 AND state IN ('queued', 'running')`, [this.organizationId, caseId]);
+    const result = await this.client.query(`SELECT 1 FROM case_analysis
+      WHERE organization_id = $1 AND case_id = $2 AND status IN ('queued', 'running')`, [this.organizationId, caseId]);
     return (result.rowCount ?? 0) > 0;
   }
 
   async queueAnalysis(caseId: string, run: { runId: string; versionIds: string[]; startedByMembershipId: string; attempt: number }): Promise<void> {
-    await this.client.query(`INSERT INTO maintenance_analysis_run
-      (run_id, organization_id, case_id, state, findings, attempt, version_ids, started_by_membership_id)
+    await this.client.query(`INSERT INTO case_analysis
+      (id, organization_id, case_id, status, findings, attempt, input_version_ids, started_by_id)
       VALUES ($1, $2, $3, 'queued', '[]'::jsonb, $4, $5::jsonb, $6)`,
     [run.runId, this.organizationId, caseId, run.attempt, JSON.stringify(run.versionIds), run.startedByMembershipId]);
   }
 
   async cancelActiveAnalysis(caseId: string): Promise<void> {
-    await this.client.query(`UPDATE maintenance_analysis_run SET state = 'cancelled', findings = '[]'::jsonb, fence = NULL
-      WHERE organization_id = $1 AND case_id = $2 AND state IN ('queued', 'running')`, [this.organizationId, caseId]);
+    await this.client.query(`UPDATE case_analysis SET status = 'cancelled', findings = '[]'::jsonb, fence_token = NULL
+      WHERE organization_id = $1 AND case_id = $2 AND status IN ('queued', 'running')`, [this.organizationId, caseId]);
   }
 
   async expireStaleAnalysis(caseId: string): Promise<void> {
-    await this.client.query(`UPDATE maintenance_analysis_run SET state = 'failed', findings = '[]'::jsonb, fence = NULL
-      WHERE organization_id = $1 AND case_id = $2 AND state = 'running' AND lease_until IS NOT NULL AND lease_until <= now()`,
+    await this.client.query(`UPDATE case_analysis SET status = 'failed', findings = '[]'::jsonb, fence_token = NULL
+      WHERE organization_id = $1 AND case_id = $2 AND status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= now()`,
     [this.organizationId, caseId]);
   }
 
   async failActiveAnalysis(caseId: string): Promise<void> {
-    await this.client.query(`UPDATE maintenance_analysis_run SET state = 'failed', findings = '[]'::jsonb, fence = NULL
-      WHERE organization_id = $1 AND case_id = $2 AND state IN ('queued', 'running')`, [this.organizationId, caseId]);
+    await this.client.query(`UPDATE case_analysis SET status = 'failed', findings = '[]'::jsonb, fence_token = NULL
+      WHERE organization_id = $1 AND case_id = $2 AND status IN ('queued', 'running')`, [this.organizationId, caseId]);
   }
 
   async claimAnalysis(caseId: string, fence: string): Promise<AnalysisRun | null> {
-    const result = await this.client.query<AnalysisRow>(`UPDATE maintenance_analysis_run
-      SET state = 'running', fence = $3, lease_until = now() + interval '30 seconds'
-      WHERE organization_id = $1 AND case_id = $2 AND state = 'queued'
-      RETURNING run_id, state, findings, version_ids, started_by_membership_id, fence, attempt`,
+    const result = await this.client.query<AnalysisRow>(`UPDATE case_analysis
+      SET status = 'running', fence_token = $3, lease_expires_at = now() + interval '30 seconds'
+      WHERE organization_id = $1 AND case_id = $2 AND status = 'queued'
+      RETURNING id AS run_id, status AS state, findings, input_version_ids AS version_ids, started_by_id AS started_by_membership_id, fence_token AS fence, attempt`,
     [this.organizationId, caseId, fence]);
     return result.rows[0] ? mapAnalysis(result.rows[0]) : null;
   }
@@ -456,17 +414,17 @@ class PgMaintenanceTx implements MaintenanceTx {
   }
 
   async commitAnalysis(caseId: string, fence: string, state: "succeeded" | "failed", findings: Array<{ versionId: string; summary: string }>): Promise<boolean> {
-    const result = await this.client.query(`UPDATE maintenance_analysis_run
-      SET state = CASE WHEN lease_until IS NOT NULL AND lease_until <= now() THEN 'failed' ELSE $4 END,
-          findings = CASE WHEN lease_until IS NOT NULL AND lease_until <= now() THEN '[]'::jsonb ELSE $5::jsonb END
-      WHERE organization_id = $1 AND case_id = $2 AND fence = $3 AND state = 'running'`,
+    const result = await this.client.query(`UPDATE case_analysis
+      SET status = CASE WHEN lease_expires_at IS NOT NULL AND lease_expires_at <= now() THEN 'failed' ELSE $4 END,
+          findings = CASE WHEN lease_expires_at IS NOT NULL AND lease_expires_at <= now() THEN '[]'::jsonb ELSE $5::jsonb END
+      WHERE organization_id = $1 AND case_id = $2 AND fence_token = $3 AND status = 'running'`,
     [this.organizationId, caseId, fence, state, JSON.stringify(findings)]);
     return (result.rowCount ?? 0) === 1;
   }
 
   async latestAnalysis(caseId: string): Promise<AnalysisRun | null> {
-    const result = await this.client.query<AnalysisRow>(`SELECT run_id, state, findings, version_ids, started_by_membership_id, fence, attempt
-      FROM maintenance_analysis_run WHERE organization_id = $1 AND case_id = $2
+    const result = await this.client.query<AnalysisRow>(`SELECT id AS run_id, status AS state, findings, input_version_ids AS version_ids, started_by_id AS started_by_membership_id, fence_token AS fence, attempt
+      FROM case_analysis WHERE organization_id = $1 AND case_id = $2
       ORDER BY created_at DESC LIMIT 1`, [this.organizationId, caseId]);
     return result.rows[0] ? mapAnalysis(result.rows[0]) : null;
   }
@@ -474,18 +432,15 @@ class PgMaintenanceTx implements MaintenanceTx {
   async listLinks(caseId: string): Promise<string[]> {
     const result = await this.client.query<{ related: string }>(`
       SELECT CASE WHEN left_case_id = $2 THEN right_case_id ELSE left_case_id END AS related
-        FROM maintenance_case_link
+        FROM case_link
        WHERE organization_id = $1 AND (left_case_id = $2 OR right_case_id = $2)`,
     [this.organizationId, caseId]);
     return result.rows.map((row) => row.related);
   }
 
   async markRead(membershipId: string, caseId: string): Promise<void> {
-    await this.client.query(`INSERT INTO maintenance_notification_receipt
-      (organization_id, notification_id, recipient_membership_id)
-      SELECT n.organization_id, n.notification_id, n.recipient_membership_id
-        FROM maintenance_notification n
-       WHERE n.organization_id = $1 AND n.case_id = $2 AND n.recipient_membership_id = $3
-      ON CONFLICT DO NOTHING`, [this.organizationId, caseId, membershipId]);
+    await this.client.query(`UPDATE notification SET read_at = now()
+      WHERE organization_id = $1 AND resource_id = $2 AND recipient_id = $3
+        AND event_type = 'MAINTENANCE_CASE_UPDATED' AND read_at IS NULL`, [this.organizationId, caseId, membershipId]);
   }
 }

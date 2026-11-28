@@ -172,11 +172,11 @@ export class PgDocumentRelationshipStore implements DocumentRelationshipStore {
       const tx: RelationshipTx = {
         resolveActiveMembership: async () => {
           const result = await client.query<{ membership_id: string }>(`
-            SELECT om.membership_id
-              FROM organization_membership om
-              JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-              JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-             WHERE om.user_id = $1
+            SELECT om.id AS membership_id
+              FROM membership om
+              JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+              JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+             WHERE om.account_id = $1
                AND om.organization_id = $2
                AND om.status = 'ACTIVE'`, [userId, organizationId]);
           return result.rows[0]?.membership_id ?? null;
@@ -191,10 +191,10 @@ export class PgDocumentRelationshipStore implements DocumentRelationshipStore {
 
         findIdempotency: async (actorMembershipId, idempotencyKey) => {
           const result = await client.query<PgIdempotencyRow>(`
-            SELECT operation, request_hash, status_code, response_json
-              FROM document_relationship_idempotency
+            SELECT operation, request_hash, http_status AS status_code, response AS response_json
+              FROM relationship_request_key
              WHERE organization_id = $1
-               AND actor_membership_id = $2
+               AND actor_id = $2
                AND idempotency_key = $3`,
           [organizationId, actorMembershipId, idempotencyKey]);
           const row = result.rows[0];
@@ -209,14 +209,14 @@ export class PgDocumentRelationshipStore implements DocumentRelationshipStore {
 
         saveIdempotency: async (record) => {
           await client.query(`
-            INSERT INTO document_relationship_idempotency (
+            INSERT INTO relationship_request_key (
               organization_id,
-              actor_membership_id,
+              actor_id,
               idempotency_key,
               operation,
               request_hash,
-              status_code,
-              response_json
+              http_status,
+              response
             ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`, [
             record.organizationId,
             record.actorMembershipId,
@@ -248,15 +248,15 @@ export class PgDocumentRelationshipStore implements DocumentRelationshipStore {
               organization_id,
               source_document_id,
               target_document_id,
-              relationship_type,
-              created_by_membership_id
+              type,
+              created_by_id
             ) VALUES ($1, $2, $3, $4, $5)
-            RETURNING relationship_id,
+            RETURNING id AS relationship_id,
                       organization_id,
                       source_document_id,
                       target_document_id,
-                      relationship_type,
-                      created_by_membership_id,
+                      type AS relationship_type,
+                      created_by_id AS created_by_membership_id,
                       created_at`, [
             organizationId,
             input.sourceDocumentId,
@@ -298,10 +298,10 @@ export class PgDocumentRelationshipStore implements DocumentRelationshipStore {
           await client.query(`
             INSERT INTO audit_event (
               organization_id,
-              actor_membership_id,
+              actor_id,
               event_type,
               outcome,
-              details_json
+              details
             ) VALUES ($1, $2, $3, $4, $5::jsonb)`, [
             record.organizationId,
             record.actorMembershipId,

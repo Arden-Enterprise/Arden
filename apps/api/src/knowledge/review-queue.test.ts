@@ -8,7 +8,7 @@ const grant = {
   membershipId: "reviewer", organizationId: "org", scope: "DEPARTMENT" as const,
   departmentId: "engineering", status: "ACTIVE" as const,
   classifications: ["INTERNAL" as const], level: "STANDARD" as const,
-  teamTag: null, projectTag: null, validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
+  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
 };
 const candidate: ReviewQueueCandidate = {
   submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide", versionNo: 3,
@@ -16,9 +16,9 @@ const candidate: ReviewQueueCandidate = {
   submission: {
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
     status: "PENDING_REVIEW", classification: "INTERNAL", policyVersion: 1,
-    teamTag: null, projectTag: null, audienceBreadth: "LIMITED", reviewRule: "GRANT_SCOPE",
+    readerBreadth: "LIMITED", reviewRule: "GRANT_SCOPE",
   },
-  reviewerGrants: [grant], effectivePolicyVersion: 1, audienceEnforceable: true,
+  reviewerGrants: [grant], effectivePolicyVersion: 1, readersEnforceable: true,
 };
 
 describe("listAssignedReviews", () => {
@@ -43,7 +43,7 @@ describe("listAssignedReviews", () => {
   });
 
   it("keeps an invalid-audience submission visible so the reviewer can reject it", () => {
-    expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...candidate, audienceEnforceable: false }] }))
+    expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...candidate, readersEnforceable: false }] }))
       .toEqual([{ submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
         departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
         approvalBlocked: true, versionNo: 3, requestType: "CONTENT", authorName: null }]);
@@ -57,16 +57,16 @@ describe("listAssignedReviews", () => {
     expect(result.map((item) => item.submissionId)).toEqual(["submission-1"]);
   });
 
-  it("accepts one matching live grant, including classification and attribute filters", () => {
-    const matching = { ...grant, teamTag: "platform", classifications: ["CONFIDENTIAL" as const] };
+  it("accepts a live grant that matches the classification and frozen scope", () => {
+    const matching = { ...grant, classifications: ["CONFIDENTIAL" as const] };
     const item: ReviewQueueCandidate = {
       ...candidate,
-      submission: { ...candidate.submission, classification: "CONFIDENTIAL", teamTag: "platform" },
-      reviewerGrants: [{ ...grant, teamTag: "other" }, matching],
+      submission: { ...candidate.submission, classification: "CONFIDENTIAL" },
+      reviewerGrants: [grant, matching],
     };
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [item] })).toHaveLength(1);
-    expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...item, reviewerGrants: [matching],
-      submission: { ...item.submission, teamTag: "other" } }] })).toEqual([]);
+    expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...item, reviewerGrants: [grant] }] }))
+      .toEqual([]);
   });
 
   it("requires a specialist or senior grant for restricted material", () => {
@@ -82,7 +82,7 @@ describe("listAssignedReviews", () => {
 
   it("shows an organization-wide submission only to an organization reviewer", () => {
     const organizationWide = { ...candidate,
-      submission: { ...candidate.submission, audienceBreadth: "ORGANIZATION_WIDE" as const },
+      submission: { ...candidate.submission, readerBreadth: "ORGANIZATION_WIDE" as const },
     };
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [organizationWide] })).toEqual([]);
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...organizationWide,

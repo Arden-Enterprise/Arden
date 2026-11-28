@@ -15,7 +15,7 @@ export type ReviewQueueCandidate = {
   submission: ReviewAuthorization["submission"];
   reviewerGrants: readonly ReviewerGrant[];
   effectivePolicyVersion: number;
-  audienceEnforceable: boolean;
+  readersEnforceable: boolean;
   /** T6.1: CONTENT, READER_CHANGE or WITHDRAWAL; omitted means CONTENT. */
   requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
 };
@@ -67,7 +67,7 @@ export function listAssignedReviews(input: {
       departmentId: candidate.submission.departmentId,
       classification: candidate.submission.classification,
       submittedAt: candidate.submittedAt,
-      approvalBlocked: !candidate.audienceEnforceable,
+      approvalBlocked: !candidate.readersEnforceable,
       versionNo: candidate.versionNo,
       requestType: candidate.requestType ?? "CONTENT",
       authorName: null,

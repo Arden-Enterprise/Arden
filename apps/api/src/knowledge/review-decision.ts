@@ -18,13 +18,10 @@ export type ReviewDecisionFacts = {
   };
   reviewerGrants: readonly ReviewerGrant[];
   effectivePolicyVersion: number;
-  audienceEnforceable: boolean;
+  readersEnforceable: boolean;
   policy: { kind: "SINGLE_REVIEWER" } | { kind: "UNSUPPORTED" };
   now: Date;
-  /**
-   * T2.1: the readers frozen at submit and the facts needed to check approved readers. A submission
-   * without proposed readers (legacy audience model) keeps today's behaviour. Omitted means legacy.
-   */
+  /** Frozen readers and the facts used to validate narrowing. Renewals and withdrawals use the current publication. */
   readers?: { proposed: ReaderSelection | null; facts: SelectionFacts };
   /** T6.1/T6.2: what the submission asks for. Omitted means CONTENT. */
   requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
@@ -44,7 +41,7 @@ export type ReviewDecisionRequest = {
   approvedReaders?: TargetReadersInput;
 };
 
-/** P and A for a Target Readers submission; null for a legacy audience submission. */
+/** Reader selection proposed by the author and approved by the reviewer. */
 export type ApprovedReadersPlan = { proposed: ReaderSelection; approved: ReaderSelection; narrowed: boolean };
 
 export type ReviewDecisionPlan =
@@ -91,14 +88,14 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
   if (request.action !== "APPROVE" || facts.policy.kind !== "SINGLE_REVIEWER") {
     return { kind: "DENIED", reason: "UNSUPPORTED_POLICY" };
   }
-  if (!facts.audienceEnforceable) return { kind: "DENIED", reason: "AUDIENCE_NOT_ENFORCEABLE" };
+  if (!facts.readersEnforceable) return { kind: "DENIED", reason: "AUDIENCE_NOT_ENFORCEABLE" };
   const approveWith = (grant: ReviewerGrant | null) => canReviewSnapshot({
     actor: facts.actor,
     submission,
     grant,
     now: facts.now,
     effectivePolicyVersion: facts.effectivePolicyVersion,
-    audienceEnforceable: facts.audienceEnforceable,
+    readersEnforceable: facts.readersEnforceable,
   });
   const canApprove = facts.actor?.isOrganizationAdmin === true
     ? approveWith(null)

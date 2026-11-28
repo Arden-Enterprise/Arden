@@ -31,8 +31,8 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
     org = created.organizationId;
     ownerMembership = (await repo!.requireActiveMembership(owner, org))!.membershipId;
     for (const [user, membership] of [[member, memberId], [other, otherId]]) {
-      await pool!.query("INSERT INTO arden.user_account(user_id,email,full_name) VALUES ($1,$2,'AI reader')", [user, `${user}@example.test`]);
-      await pool!.query("INSERT INTO arden.organization_membership(membership_id,organization_id,user_id) VALUES ($1,$2,$3)", [membership, org, user]);
+      await pool!.query("INSERT INTO arden.account(id,email,full_name) VALUES ($1,$2,'AI reader')", [user, `${user}@example.test`]);
+      await pool!.query("INSERT INTO arden.membership(id,organization_id,account_id) VALUES ($1,$2,$3)", [membership, org, user]);
     }
     const draft = await repo!.createNewKnowledgeDraft(owner, org, { actorMembershipId: ownerMembership, title: "Published guide",
       classification: "INTERNAL", idempotencyKey: randomUUID(), content: { sourceUri: "arden-private-object://ai-fixture",
@@ -50,22 +50,22 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
         await client.query("SET LOCAL search_path TO arden, public");
         // Synthetic fixture only; no production cleanup path uses trigger suppression.
         await client.query("SET LOCAL session_replication_role = replica");
-        for (const table of ["ai_turn_surface_binding", "ai_turn_evidence", "ai_conversation_turn", "ai_conversation"])
+        for (const table of ["turn_display_source", "turn_evidence", "conversation_turn", "conversation"])
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
-        await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id=$1)", [org]);
-        await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id=$1)", [org]);
-        await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id=$1", [draftId]);
-        await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id=$1", [draftId]);
-        for (const table of ["knowledge_collection_document", "knowledge_collection", "knowledge_current_publication",
-          "knowledge_index_generation", "shared_submission", "shared_draft_audience", "shared_draft",
-          "selected_reader", "reader_selection", "knowledge_base", "audit_event", "audience_group_membership", "audience", "reviewer_grant"])
+        await client.query("DELETE FROM review_decision WHERE review_submission_id IN (SELECT id AS submission_id FROM review_submission WHERE organization_id=$1)", [org]);
+        await client.query("DELETE FROM working_version WHERE document_id=$1", [draftId]);
+        await client.query("DELETE FROM published_version WHERE document_id=$1", [draftId]);
+        for (const table of ["handbook", "current_publication",
+          "index_generation", "review_submission", "company_document",
+          "policy_reader", "reader_policy", "knowledge_base", "audit_event", "reviewer_grant"])
           await client.query(`DELETE FROM ${table} WHERE organization_id=$1`, [org]);
         for (const table of ["department_membership", "role_assignment"])
-          await client.query(`DELETE FROM ${table} WHERE membership_id IN (SELECT membership_id FROM organization_membership WHERE organization_id=$1)`, [org]);
-        await client.query("DELETE FROM role_permission WHERE role_id IN (SELECT role_id FROM role WHERE organization_id=$1)", [org]);
-        for (const table of ["organization_membership", "department", "role", "access_scope", "organization"])
+          await client.query(`DELETE FROM ${table} WHERE membership_id IN (SELECT id AS membership_id FROM membership WHERE organization_id=$1)`, [org]);
+        await client.query("DELETE FROM role_permission WHERE role_id IN (SELECT id AS role_id FROM role WHERE organization_id=$1)", [org]);
+        for (const table of ["membership", "department", "role", "access_scope"])
           await client.query(`DELETE FROM ${table} WHERE organization_id=$1`, [org]);
-        await client.query("DELETE FROM user_account WHERE user_id=ANY($1::uuid[])", [[owner, member, other]]);
+        await client.query("DELETE FROM organization WHERE id=$1", [org]);
+        await client.query("DELETE FROM account WHERE id=ANY($1::uuid[])", [[owner, member, other]]);
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -113,8 +113,8 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
       to_regprocedure('arden.eligible_ai_publications(text)') IS NULL AS retired_selector,
       to_regprocedure('arden.eligible_ai_publications()') IS NOT NULL AS current_sources,
       NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='arden'
-          AND table_name='ai_conversation_turn' AND column_name='version_scope') AS retired_column,
-      to_regclass('arden.ai_turn_evidence') IS NOT NULL AS evidence_preserved`);
+          AND table_name='conversation_turn' AND column_name='version_scope') AS retired_column,
+      to_regclass('arden.turn_evidence') IS NOT NULL AS evidence_preserved`);
     expect(Object.values(result.rows[0])).toEqual([true, true, true, true, true, true]);
   });
 
@@ -139,7 +139,7 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
     const expired = await publish({ mode: "ORGANIZATION" }, date(-2));
     expect(await repo!.readerSources.resolve(member, org, expired.publishedVersionId)).toBeNull();
     expect(await sources(member)).toEqual([]); // no resurrection of a readable older policy
-    await pool!.query("DELETE FROM arden.knowledge_current_publication WHERE shared_draft_id=$1", [draftId]);
+    await pool!.query("DELETE FROM arden.current_publication WHERE document_id=$1", [draftId]);
     expect(await repo!.readerSources.resolve(member, org, restricted.publishedVersionId)).toBeNull();
     expect(await sources(member)).toEqual([]);
     await publish();
@@ -178,16 +178,16 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
       turns: [{ id: savedTurnId, answer: "Use MFA.", feedback: "BAD" }] });
     expect(await conversations.setFeedback(member, org, id, savedTurnId, null)).toBe(true);
     expect(await conversations.load(member, org, id)).toEqual(before);
-    await pool!.query("UPDATE arden.organization_membership SET status='SUSPENDED' WHERE membership_id=$1", [memberId]);
+    await pool!.query("UPDATE arden.membership SET status='SUSPENDED' WHERE id=$1", [memberId]);
     expect(await conversations.setFeedback(member, org, id, savedTurnId, "GOOD")).toBe(false);
     expect(await repo!.readerSources.resolve(member, org, ref.publishedVersionId)).toBeNull();
     expect(await conversations.load(member, org, id)).toBeNull();
     expect(await repo!.listAuthorizedAiSources(member, org)).toBeNull();
-    await pool!.query("UPDATE arden.organization_membership SET status='ACTIVE' WHERE membership_id=$1", [memberId]);
+    await pool!.query("UPDATE arden.membership SET status='ACTIVE' WHERE id=$1", [memberId]);
     expect((await conversations.load(member, org, id))?.revision).toBe(1);
-    await pool!.query("UPDATE arden.user_account SET status='DISABLED' WHERE user_id=$1", [member]);
+    await pool!.query("UPDATE arden.account SET status='DISABLED' WHERE id=$1", [member]);
     expect(await conversations.load(member, org, id)).toBeNull();
-    await pool!.query("UPDATE arden.user_account SET status='ACTIVE' WHERE user_id=$1", [member]);
+    await pool!.query("UPDATE arden.account SET status='ACTIVE' WHERE id=$1", [member]);
   }, 30_000);
 
   it("withholds exact-document Q&A after real runtime membership revocation without storing turns", async () => {
@@ -211,13 +211,13 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
     };
     expect((await new ReaderQuestion(gate, ai).answer(member, org, ref.publishedVersionId, requestId, "How to sign in?")).citations[0].versionId).toBe(ref.publishedVersionId);
     const revoked = new ReaderQuestion(gate, { ...ai, generate: async () => {
-      await pool!.query("UPDATE arden.organization_membership SET status='SUSPENDED' WHERE membership_id=$1", [memberId]);
+      await pool!.query("UPDATE arden.membership SET status='SUSPENDED' WHERE id=$1", [memberId]);
       return ai.generate();
     } });
     try {
       await expect(revoked.answer(member, org, ref.publishedVersionId, requestId, "How to sign in?")).rejects.toMatchObject({ code: "NOT_FOUND" });
       await expect(new ReaderQuestion(gate, ai).answer(member, org, ref.publishedVersionId, requestId, "q")).rejects.toMatchObject({ code: "NOT_FOUND" });
-    } finally { await pool!.query("UPDATE arden.organization_membership SET status='ACTIVE' WHERE membership_id=$1", [memberId]); }
+    } finally { await pool!.query("UPDATE arden.membership SET status='ACTIVE' WHERE id=$1", [memberId]); }
     expect(await repo!.conversations.list(member, org)).toEqual(historyBefore);
   }, 30_000);
 
@@ -248,14 +248,14 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
     const allowed = new ReaderSummary(source, { summarizeReaderSource: async () => response });
     expect((await allowed.summarize(member, org, ref.publishedVersionId, requestId)).points[0].citations[0].versionId).toBe(ref.publishedVersionId);
     const revoked = new ReaderSummary(source, { summarizeReaderSource: async () => {
-      await pool!.query("UPDATE arden.organization_membership SET status='SUSPENDED' WHERE membership_id=$1", [memberId]);
+      await pool!.query("UPDATE arden.membership SET status='SUSPENDED' WHERE id=$1", [memberId]);
       return response;
     } });
     try {
       await expect(revoked.summarize(member, org, ref.publishedVersionId, requestId)).rejects.toMatchObject({ code: "NOT_FOUND" });
       await expect(gate.checkAccess(member, org, ref.publishedVersionId)).rejects.toMatchObject({ code: "NOT_FOUND" });
     } finally {
-      await pool!.query("UPDATE arden.organization_membership SET status='ACTIVE' WHERE membership_id=$1", [memberId]);
+      await pool!.query("UPDATE arden.membership SET status='ACTIVE' WHERE id=$1", [memberId]);
     }
     expect(await repo!.conversations.list(member, org)).toEqual(historyBefore); // Summary never appends chat history.
   }, 30_000);

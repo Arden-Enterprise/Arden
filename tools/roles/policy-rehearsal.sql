@@ -1,9 +1,15 @@
--- Manual rollback-only rehearsal. No persistent fixture or user data changes.
+-- Historical rollback-only rehearsal for the RBAC publication model through 0085.
+-- The current reader policy is verified by the Target Readers integration suite.
 -- Run as the existing migration owner, with psql ON_ERROR_STOP=1 and pager=off.
 BEGIN;
 SET LOCAL lock_timeout = '3s';
 SET LOCAL statement_timeout = '15s';
 SET LOCAL search_path = arden, public;
+DO $$ BEGIN
+    IF to_regclass('arden.audience') IS NULL THEN
+        RAISE EXCEPTION 'This historical rehearsal requires the pre-0086 schema';
+    END IF;
+END; $$;
 CREATE TEMP TABLE role_rehearsal_ids ON COMMIT DROP AS SELECT
     gen_random_uuid() AS owner_user, gen_random_uuid() AS other_user,
     gen_random_uuid() AS organization_id, gen_random_uuid() AS owner_member,

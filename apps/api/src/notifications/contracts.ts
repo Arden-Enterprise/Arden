@@ -3,10 +3,12 @@ export const notificationTypes = [
   "PUBLICATION_FAILED", "DOCUMENT_SHARED_PERSONAL", "DOCUMENT_SHARED_GROUP",
   "PRIMARY_DEPARTMENT_CHANGED", "REVIEWER_GRANT_CREATED", "REVIEWER_GRANT_REVOKED",
   "PUBLICATION_EXPIRING", "PUBLICATION_RENEWAL_ON_BEHALF", "DOCUMENT_SHARED_DIRECT",
+  "MAINTENANCE_CASE_UPDATED",
 ] as const;
 
 export type NotificationType = typeof notificationTypes[number];
-export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DOCUMENT" | "DEPARTMENT" | "REVIEWER_GRANT" | "PRIVATE_ITEM";
+export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DOCUMENT" | "DEPARTMENT" | "REVIEWER_GRANT"
+  | "PRIVATE_ITEM" | "MAINTENANCE_CASE";
 export type NotificationRecord = {
   id: string;
   type: NotificationType;
@@ -20,6 +22,7 @@ export type NotificationRecord = {
   expiresOn?: string;
   /** PUBLICATION_RENEWAL_ON_BEHALF only: why the renewal was requested. */
   requestReason?: string;
+  maintenance?: { message: string; reporter: boolean };
   createdAt: string;
   readAt: string | null;
 };

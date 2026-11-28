@@ -6,7 +6,6 @@ import { PgSurfaceHydrator, type UiSurfaceHydrator } from "../answers/ui-surface
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { insertAiUsageEvents } from "./ai-usage.js";
-import { departmentAudienceName } from "./department-audience-name.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
 import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
@@ -14,9 +13,10 @@ import { PgGraphStore, type GraphStore } from "../graph/graph-service.js";
 import { PgDocumentRelationshipStore, type DocumentRelationshipStore } from "../graph/relationship-service.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
   type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
-import type { MaintenancePort } from "../maintenance/case-service.js";
+import { MaintenanceCaseService, type MaintenancePort } from "../maintenance/case-service.js";
+import { MaintenanceError } from "../maintenance/contracts.js";
 import { createHash, randomUUID } from "node:crypto";
-import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
+import { canContributePrivateDocument, canRespondToSubmission, canSubmitReaderSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
 import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "../knowledge/review-decision.js";
 import { canRead, maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
@@ -269,7 +269,7 @@ export type ReviewerGrantRecord = Omit<ReviewerGrantInput, "level"> & {
   validFrom: Date;
 };
 export class ReviewerGrantConflictError extends Error {
-  constructor() { super("Reviewer permission already assigned for this scope and tags."); }
+  constructor() { super("Reviewer permission already assigned for this scope."); }
 }
 /** Proposed readers resolved for the reviewer's narrowing UI (T2.1/T2.2). */
 export type ProposedReadersDetail = {
@@ -296,7 +296,7 @@ export type ReviewDetail = {
   submittedByMembershipId: string;
   teamTag: string | null;
   projectTag: string | null;
-  /** null for a legacy audience submission. */
+  /** Absent when the request has no proposed reader changes or predates Target Readers. */
   proposedReaders: ProposedReadersDetail | null;
 };
 export type DecideReviewResult =
@@ -317,7 +317,7 @@ export type PublishedKnowledge = {
   contentHash: string;
   sourceUri: string;
   audienceRoleIds: string[];
-  /** Approved Target Readers; null keeps the legacy audience behaviour. */
+  /** Approved Target Readers. A missing selection grants no reader access. */
   targetReaders: ReaderSelection | null;
   publishedAt: Date;
   validFrom: Date;
@@ -342,7 +342,7 @@ export type AuthorizedAiSource = {
   targetScopeType: "ORGANIZATION" | "DEPARTMENT";
   /** Responsible department UUID for published versions (populated for Flow 2+ publications). */
   responsibleDepartmentId?: string | null;
-  /** Approved Target Readers; null keeps the legacy audience behaviour. */
+  /** Approved Target Readers. A missing selection grants no reader access. */
   targetReaders: ReaderSelection | null;
 };
 type ReaderSelectionColumns = {
@@ -357,10 +357,10 @@ type ReaderSelectionColumns = {
  */
 function readerSelectionColumns(selectionId: string, prefix = "readers"): string {
   return `${selectionId} AS ${prefix}_selection_id,
-         (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS ${prefix}_mode,
-         (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS ${prefix}_department_id,
-         ARRAY(SELECT sr.membership_id::text FROM selected_reader sr
-                WHERE sr.selection_id = ${selectionId} ORDER BY sr.ordinal) AS ${prefix}_member_ids`;
+         (SELECT rs.mode FROM reader_policy rs WHERE rs.id = ${selectionId}) AS ${prefix}_mode,
+         (SELECT rs.department_id FROM reader_policy rs WHERE rs.id = ${selectionId}) AS ${prefix}_department_id,
+         ARRAY(SELECT sr.membership_id::text FROM policy_reader sr
+                WHERE sr.reader_policy_id = ${selectionId} ORDER BY sr.position) AS ${prefix}_member_ids`;
 }
 function toReaderSelection(selectionId: string | null, mode: ReaderMode | null, departmentId: string | null,
   memberIds: string[] | null): ReaderSelection | null {
@@ -393,8 +393,6 @@ type SharedDraftRow = ReaderSelectionColumns & {
   status: "ACTIVE" | "ARCHIVED";
   responsible_department_id: string | null;
   target_scope_type: "ORGANIZATION" | "DEPARTMENT" | null;
-  team_tag: string | null;
-  project_tag: string | null;
   create_request_hash: string;
   shared_draft_version_id: string;
   content_uri: string;
@@ -405,28 +403,25 @@ type SharedDraftRow = ReaderSelectionColumns & {
   has_pending_submission: boolean;
   created_at: Date;
   updated_at: Date;
-  audience_role_ids: string[];
   draft_selection_revision: number | null;
 };
 const sharedDraftSelect = `
-  SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id,
-         d.management,
-         EXISTS (SELECT 1 FROM shared_submission prior WHERE prior.shared_draft_id = d.shared_draft_id
+  SELECT d.id AS shared_draft_id, d.title, d.classification, d.source_private_version_id,
+         d.metadata AS management,
+         EXISTS (SELECT 1 FROM review_submission prior WHERE prior.document_id = d.id
            AND prior.publication_state IN ('ACTIVE', 'SUPERSEDED')) AS has_published_version,
-         d.author_membership_id, d.status,
-         d.responsible_department_id, d.target_scope_type, d.team_tag, d.project_tag,
+         d.author_id AS author_membership_id, d.status,
+         d.owner_department_id AS responsible_department_id, d.target_scope AS target_scope_type,
          d.create_request_hash, d.current_version_no, d.created_at, d.updated_at,
-         EXISTS (SELECT 1 FROM shared_submission pending
-                 WHERE pending.shared_draft_id = d.shared_draft_id
+         EXISTS (SELECT 1 FROM review_submission pending
+                 WHERE pending.document_id = d.id
                    AND pending.status = 'PENDING_REVIEW') AS has_pending_submission,
-         v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash, v.content_size_bytes,
-         ARRAY(SELECT a.role_id::text FROM shared_draft_audience a
-               WHERE a.shared_draft_id = d.shared_draft_id ORDER BY a.role_id) AS audience_role_ids,
-         (SELECT rs.revision FROM reader_selection rs
-           WHERE rs.selection_id = d.draft_selection_id) AS draft_selection_revision,
-         ${readerSelectionColumns("d.draft_selection_id")}
-    FROM shared_draft d
-    JOIN shared_draft_version v ON v.shared_draft_id = d.shared_draft_id
+         v.id AS shared_draft_version_id, v.file_uri AS content_uri, v.mime_type, v.content_hash, v.size_bytes AS content_size_bytes,
+         (SELECT rs.revision FROM reader_policy rs
+           WHERE rs.id = d.reader_policy_id) AS draft_selection_revision,
+         ${readerSelectionColumns("d.reader_policy_id")}
+    FROM company_document d
+    JOIN working_version v ON v.document_id = d.id
                                AND v.version_no = d.current_version_no`;
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
@@ -439,9 +434,9 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     sourcePrivateVersionId: row.source_private_version_id,
     responsibleDepartmentId: row.responsible_department_id,
     targetScopeType: row.target_scope_type,
-    teamTag: row.team_tag,
-    projectTag: row.project_tag,
-    audienceRoleIds: row.audience_role_ids,
+    teamTag: null,
+    projectTag: null,
+    audienceRoleIds: [],
     targetReaders: mapReaderSelection(row),
     versionId: row.shared_draft_version_id,
     sourceUri: row.content_uri,
@@ -465,7 +460,6 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   responsible_department_id: string;
   target_scope_type: "ORGANIZATION" | "DEPARTMENT";
   target_department_id: string | null;
-  audience_role_ids: string[];
   content_hash: string;
   content_uri: string;
   mime_type: string;
@@ -473,8 +467,6 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   publication_state: SharedKnowledgeSubmission["publicationState"];
   submitted_at: Date;
   submitted_by_membership_id: string;
-  team_tag: string | null;
-  project_tag: string | null;
   policy_version: number;
   review_rule: "LEGACY" | "GRANT_SCOPE";
   organization_wide: boolean;
@@ -490,31 +482,34 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   renewal_expiration_date?: string | null;
   on_behalf_of_author?: boolean;
 };
-// organization_wide: the frozen audience includes the organization audience. That kind is valid only at
-// Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
-// so it is detected even when the reviewer cannot see the snapshot's group or department audiences.
+// The review scope, captured on submission, also routes later change requests.
 const submissionSelect = `
-  SELECT s.submission_id, s.shared_draft_id, s.shared_draft_version_id,
-         s.management,
+  SELECT s.id AS submission_id, s.document_id AS shared_draft_id, s.working_version_id AS shared_draft_version_id,
+         s.metadata AS management,
          s.snapshot_version_no,
-         s.title, s.classification, s.responsible_department_id, s.target_scope_type,
-         s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
-         s.mime_type, s.status, s.publication_state, s.submitted_at, s.submitted_by_membership_id,
-         s.team_tag, s.project_tag, s.policy_version, s.review_rule,
-         ${readerSelectionColumns("s.proposed_selection_id")},
-         ${readerSelectionColumns("s.approved_selection_id", "approved")},
-         (s.target_scope_type = 'ORGANIZATION' AND EXISTS (
-           SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
-              AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
+         s.title, s.classification, s.owner_department_id AS responsible_department_id, s.target_scope AS target_scope_type,
+         s.target_department_id, s.content_hash, s.file_uri AS content_uri,
+         s.mime_type, s.status, s.publication_state, s.submitted_at, s.submitted_by_id AS submitted_by_membership_id,
+         s.policy_version, s.review_rule,
+         ${readerSelectionColumns("s.proposed_reader_policy_id")},
+         ${readerSelectionColumns("s.approved_reader_policy_id", "approved")},
+         (s.target_scope = 'ORGANIZATION') AS organization_wide,
          cp.published_version_id,
          rd.comment AS decision_comment, s.request_type, s.request_reason, s.target_published_version_id,
          knowledge_publication_failure_kind(s.publication_failure_code) AS publication_failure,
-         s.withdrawn_by, s.withdrawn_reason, s.withdrawn_at,
-         to_char(s.renewal_expiration_date, 'YYYY-MM-DD') AS renewal_expiration_date, s.on_behalf_of_author
-    FROM shared_submission s
-    LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
-    LEFT JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
-    LEFT JOIN review_decision rd ON rd.submission_id = s.submission_id AND rd.flow2`;
+         s.withdrawn_by_role AS withdrawn_by, s.withdrawal_reason AS withdrawn_reason, s.withdrawn_at,
+         to_char(s.renewal_valid_until, 'YYYY-MM-DD') AS renewal_expiration_date, s.on_behalf_of_author
+    FROM review_submission s
+    LEFT JOIN published_version pv ON pv.review_submission_id = s.id
+    LEFT JOIN current_publication cp ON cp.published_version_id = pv.id
+    LEFT JOIN review_decision rd ON rd.review_submission_id = s.id AND rd.is_snapshot_review`;
+function submissionReadersEnforceable(row: SharedSubmissionRow): boolean {
+  if (row.request_type === "RENEWAL" || row.request_type === "WITHDRAWAL") {
+    return row.target_published_version_id !== null;
+  }
+  return row.readers_selection_id !== null && row.readers_mode !== null;
+}
+
 type GovernanceViewRow = {
   document_id: string; published_version_id: string; title: string; content_uri: string; content_hash: string;
   mime_type: string; responsible_department_id: string | null; reader_mode: GovernanceReaderMode;
@@ -551,7 +546,7 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     responsibleDepartmentId: row.responsible_department_id,
     targetScopeType: row.target_scope_type,
     targetDepartmentId: row.target_department_id,
-    audienceRoleIds: row.audience_role_ids,
+    audienceRoleIds: [],
     proposedTargetReaders: mapReaderSelection(row),
     approvedTargetReaders: toReaderSelection(row.approved_selection_id, row.approved_mode,
       row.approved_department_id, row.approved_member_ids),
@@ -577,8 +572,6 @@ type ReviewerGrantRow = {
   department_id: string | null;
   classifications: KnowledgeClassification[];
   level: "STANDARD" | "SPECIALIST" | "SENIOR";
-  team_tag: string | null;
-  project_tag: string | null;
   status: "ACTIVE" | "INACTIVE";
   valid_from: Date;
   valid_until: Date | null;
@@ -591,8 +584,8 @@ function mapReviewerGrant(row: ReviewerGrantRow): ReviewerGrantRecord {
     departmentId: row.department_id,
     classifications: row.classifications,
     level: row.level,
-    teamTag: row.team_tag,
-    projectTag: row.project_tag,
+    teamTag: null,
+    projectTag: null,
     status: row.status,
     validFrom: row.valid_from,
     validUntil: row.valid_until,
@@ -607,10 +600,10 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
     classification: row.classification,
     policyVersion: row.policy_version,
     reviewRule: row.review_rule,
-    teamTag: row.team_tag,
-    projectTag: row.project_tag,
+    teamTag: null,
+    projectTag: null,
     // Anything but an explicit false fails closed to the stricter organization-wide requirement.
-    audienceBreadth: row.organization_wide === false ? "LIMITED" as const : "ORGANIZATION_WIDE" as const,
+    readerBreadth: row.organization_wide === false ? "LIMITED" as const : "ORGANIZATION_WIDE" as const,
   };
 }
 type PublishedKnowledgeRow = ReaderSelectionColumns & {
@@ -623,7 +616,6 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
   responsible_department_name: string | null;
   content_hash: string;
   content_uri: string;
-  audience_role_ids: string[];
   published_at: Date;
   valid_from: Date;
   valid_until: Date | null;
@@ -645,19 +637,19 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
   responsible_department_id: string | null;
 };
 const publishedKnowledgeSelect = `
-  SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
-         pv.management,
-         pv.responsible_department_id, pv.content_hash, pv.content_uri,
+  SELECT pv.id AS published_version_id, pv.document_id AS shared_draft_id, pv.title, pv.classification,
+         pv.metadata AS management,
+         pv.owner_department_id AS responsible_department_id, pv.content_hash, pv.file_uri AS content_uri,
          owner_department.name AS responsible_department_name,
-         pv.audience_role_ids, pv.published_at,
+         pv.published_at,
          cp.valid_from, cp.valid_until,
-         to_char(publication_expiration_date(pv.published_version_id, pv.management), 'YYYY-MM-DD') AS expiration_date,
-         COALESCE(publication_expiration_date(pv.published_version_id, pv.management)
+         to_char(publication_expiration_date(pv.id, pv.metadata), 'YYYY-MM-DD') AS expiration_date,
+         COALESCE(publication_expiration_date(pv.id, pv.metadata)
            < (now() AT TIME ZONE 'UTC')::date, false) AS expired,
-         ${readerSelectionColumns("pv.reader_selection_id")}
-    FROM knowledge_current_publication cp
-    JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
-    LEFT JOIN department owner_department ON owner_department.department_id = pv.responsible_department_id
+         ${readerSelectionColumns("pv.reader_policy_id")}
+    FROM current_publication cp
+    JOIN published_version pv ON pv.id = cp.published_version_id
+    LEFT JOIN department owner_department ON owner_department.id = pv.owner_department_id
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   const management = currentManagement(row.management);
@@ -672,7 +664,7 @@ function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
     responsibleDepartmentName: row.responsible_department_name,
     contentHash: row.content_hash,
     sourceUri: row.content_uri,
-    audienceRoleIds: row.audience_role_ids,
+    audienceRoleIds: [],
     targetReaders: mapReaderSelection(row),
     publishedAt: row.published_at,
     validFrom: row.valid_from,
@@ -773,7 +765,7 @@ export interface ArdenDataRepository {
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
   listOwnedKnowledgeSubmissionIds(userId: string, organizationId: string,
     submissionIds: readonly string[]): Promise<string[] | null>;
-  /** Current publication IDs allowed by the caller's active audience and Target Readers policy. */
+  /** Current publication IDs allowed by the caller's Target Readers policy. */
   listReadableCurrentPublicationIds(userId: string, organizationId: string,
     publishedVersionIds: readonly string[]): Promise<string[] | null>;
   retryKnowledgePublication(userId: string, organizationId: string, submissionId: string):
@@ -826,31 +818,31 @@ export interface ArdenDataRepository {
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
   return `
   EXISTS (
-    SELECT 1 FROM user_account ua
-     WHERE ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+    SELECT 1 FROM account ua
+     WHERE ua.id = om.account_id AND ua.status = 'ACTIVE'
   ) AND om.status = 'ACTIVE'
     AND EXISTS (SELECT 1 FROM organization active_org
-      WHERE active_org.organization_id = om.organization_id AND active_org.status = 'ACTIVE')
+      WHERE active_org.id = om.organization_id AND active_org.status = 'ACTIVE')
     AND (${permissionParameter} IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE') OR EXISTS (
     SELECT 1
       FROM role_assignment ra
-      JOIN role r ON r.role_id = ra.role_id AND r.status = 'ACTIVE'
-      JOIN role_permission rp ON rp.role_id = r.role_id
-      JOIN permission p ON p.permission_id = rp.permission_id AND p.status = 'ACTIVE'
-      JOIN access_scope s ON s.access_scope_id = ra.access_scope_id
+      JOIN role r ON r.id = ra.role_id AND r.status = 'ACTIVE'
+      JOIN role_permission rp ON rp.role_id = r.id
+      JOIN permission p ON p.id = rp.permission_id AND p.status = 'ACTIVE'
+      JOIN access_scope s ON s.id = ra.access_scope_id
                           AND s.organization_id = om.organization_id
                           AND s.status = 'ACTIVE'
-     WHERE ra.membership_id = om.membership_id
+     WHERE ra.membership_id = om.id
        AND ra.status = 'ACTIVE'
        AND ra.valid_from <= now()
        AND (ra.valid_until IS NULL OR ra.valid_until > now())
        AND p.code = ${permissionParameter}
        AND (
-         s.scope_type = 'ORGANIZATION'
+         s.scope = 'ORGANIZATION'
          OR EXISTS (
            SELECT 1
              FROM department_membership dm
-            WHERE dm.membership_id = om.membership_id
+            WHERE dm.membership_id = om.id
               AND dm.department_id = s.department_id
               AND dm.status = 'ACTIVE'
          )
@@ -894,11 +886,11 @@ export class ArdenRepository implements ArdenDataRepository {
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const result = await client.query<{ membership_id: string }>(`
-        SELECT om.membership_id
-          FROM organization_membership om
-          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-         WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+        SELECT om.id AS membership_id
+          FROM membership om
+          JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
       const membershipId = result.rows[0]?.membership_id;
       return membershipId ? { membershipId, organizationId, userId } : null;
     });
@@ -909,14 +901,14 @@ export class ArdenRepository implements ArdenDataRepository {
     return this.withActorContext(userId, organizationId, async client => {
       const membershipId = await this.activeActorMembership(client, userId, organizationId);
       if (!membershipId) return false;
-      const created = await client.query(`INSERT INTO ai_answer_result(
-        request_id, organization_id, owner_membership_id, result_type, answer_status, citation_count)
+      const created = await client.query(`INSERT INTO answer_result(
+        request_id, organization_id, owner_id, type, status, citation_count)
         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (request_id) DO NOTHING RETURNING request_id`,
       [requestId, organizationId, membershipId, resultType, answerStatus, citationCount]);
       if (created.rowCount) return true;
-      const existing = await client.query(`SELECT 1 FROM ai_answer_result WHERE request_id = $1
-        AND organization_id = $2 AND owner_membership_id = $3 AND result_type = $4
-        AND answer_status = $5 AND citation_count = $6`,
+      const existing = await client.query(`SELECT 1 FROM answer_result WHERE request_id = $1
+        AND organization_id = $2 AND owner_id = $3 AND type = $4
+        AND status = $5 AND citation_count = $6`,
       [requestId, organizationId, membershipId, resultType, answerStatus, citationCount]);
       return Boolean(existing.rowCount);
     });
@@ -937,15 +929,15 @@ export class ArdenRepository implements ArdenDataRepository {
       // Only a Reader answer this member owns in this organization can be rated here; any other
       // request id inserts nothing and maps to 404. Ask Arden chat ratings are saved on the turn
       // (PUT .../turns/:turnId/feedback), so each rating has exactly one source of truth.
-      const result = await client.query(`INSERT INTO ai_answer_feedback(
+      const result = await client.query(`INSERT INTO answer_feedback(
         request_id, organization_id, membership_id, rating)
-        SELECT ar.request_id, ar.organization_id, ar.owner_membership_id, $4::text
-          FROM ai_answer_result ar
-         WHERE ar.request_id = $1::uuid AND ar.organization_id = $2::uuid AND ar.owner_membership_id = $3::uuid
-           AND ar.result_type = 'READER_QUESTION'
+        SELECT ar.request_id, ar.organization_id, ar.owner_id, $4::text
+          FROM answer_result ar
+         WHERE ar.request_id = $1::uuid AND ar.organization_id = $2::uuid AND ar.owner_id = $3::uuid
+           AND ar.type = 'READER_QUESTION'
         ON CONFLICT (request_id, membership_id) DO UPDATE
           SET rating = EXCLUDED.rating, updated_at = now()
-        RETURNING feedback_id`, [requestId, organizationId, membershipId, rating]);
+        RETURNING id AS feedback_id`, [requestId, organizationId, membershipId, rating]);
       return Boolean(result.rowCount);
     });
   }
@@ -961,27 +953,27 @@ export class ArdenRepository implements ArdenDataRepository {
       role_codes: string[] | null;
       can_use_private_workspace: boolean;
     }>(`
-      SELECT o.organization_id,
+      SELECT o.id AS organization_id,
              o.name AS organization_name,
              om.status,
              max(dm.department_id::text) FILTER (WHERE dm.is_primary AND dm.status = 'ACTIVE')::uuid AS department_id,
              max(d.name) FILTER (WHERE dm.is_primary AND dm.status = 'ACTIVE') AS department_name,
              COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS role_codes,
              (${membershipPermissionSql("$2")}) AS can_use_private_workspace
-        FROM organization_membership om
-        JOIN organization o ON o.organization_id = om.organization_id
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        LEFT JOIN department_membership dm ON dm.membership_id = om.membership_id AND dm.is_primary AND dm.status = 'ACTIVE'
-        LEFT JOIN department d ON d.department_id = dm.department_id AND d.status = 'ACTIVE'
+        FROM membership om
+        JOIN organization o ON o.id = om.organization_id
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        LEFT JOIN department_membership dm ON dm.membership_id = om.id AND dm.is_primary AND dm.status = 'ACTIVE'
+        LEFT JOIN department d ON d.id = dm.department_id AND d.status = 'ACTIVE'
         LEFT JOIN role_assignment ra
-          ON ra.membership_id = om.membership_id
+          ON ra.membership_id = om.id
          AND ra.status = 'ACTIVE'
          AND ra.valid_from <= now()
          AND (ra.valid_until IS NULL OR ra.valid_until > now())
-        LEFT JOIN role r ON r.role_id = ra.role_id AND r.status = 'ACTIVE'
-       WHERE om.user_id = $1
-       GROUP BY o.organization_id, o.name, om.membership_id, om.status
-       ORDER BY o.name, o.organization_id`, [userId, "PRIVATE_WORKSPACE_READ"]);
+        LEFT JOIN role r ON r.id = ra.role_id AND r.status = 'ACTIVE'
+       WHERE om.account_id = $1
+       GROUP BY o.id, o.name, om.id, om.status
+       ORDER BY o.name, o.id`, [userId, "PRIVATE_WORKSPACE_READ"]);
 
     // Reviews is for Organization Admins and members with an active reviewer grant. Grants are readable only
     // inside their organization's context, so each active membership is checked in its own context.
@@ -991,8 +983,8 @@ export class ArdenRepository implements ArdenDataRepository {
       if ((row.role_codes ?? []).includes("ORG_ADMIN")) { reviewers.add(row.organization_id); continue; }
       await client.query("SELECT set_config('arden.organization_id', $1, true)", [row.organization_id]);
       const grant = await client.query(`SELECT 1 FROM reviewer_grant g
-        JOIN organization_membership om ON om.membership_id = g.reviewer_membership_id
-       WHERE g.organization_id = $1 AND om.user_id = $2 AND om.status = 'ACTIVE' AND g.status = 'ACTIVE'
+        JOIN membership om ON om.id = g.reviewer_id
+       WHERE g.organization_id = $1 AND om.account_id = $2 AND om.status = 'ACTIVE' AND g.status = 'ACTIVE'
          AND g.valid_from <= now() AND (g.valid_until IS NULL OR g.valid_until > now())
        LIMIT 1`, [row.organization_id, userId]);
       if (grant.rowCount) reviewers.add(row.organization_id);
@@ -1022,32 +1014,17 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`
-        INSERT INTO user_account (user_id, email, full_name)
+        INSERT INTO account (id, email, full_name)
         VALUES ($1, $2, $3)
-        ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
+        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
       [userId, email, profileName]);
       const organization = await client.query<{ organization_id: string }>(`
-        INSERT INTO organization (name, slug, created_by_user_id)
+        INSERT INTO organization (name, slug, created_by_account_id)
         VALUES ($1, $2, $3)
-        RETURNING organization_id`, [setup.name, organizationSlug(setup.name), userId]);
+        RETURNING id AS organization_id`, [setup.name, organizationSlug(setup.name), userId]);
       const organizationId = organization.rows[0]?.organization_id;
       if (!organizationId) throw new Error("Organization creation returned no id");
       await client.query("SELECT set_config('arden.organization_id', $1, true), set_config('arden.org_admin', 'true', true)", [organizationId]);
-
-      const allMembersRole = await client.query<{ role_id: string }>(`
-        INSERT INTO role (organization_id, code, name, description, is_system)
-        VALUES ($1, 'ALL_MEMBERS', 'Everyone in organization',
-          'Server-managed audience for every active organization member', false)
-        RETURNING role_id`, [organizationId]);
-      const allMembersRoleId = allMembersRole.rows[0]?.role_id;
-      if (!allMembersRoleId) throw new Error("Organization audience creation returned no id");
-      await client.query(`INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission
-        WHERE code = 'PUBLISHED_CONTENT_VIEW' AND status = 'ACTIVE'`, [allMembersRoleId]);
-      await client.query(`INSERT INTO audience (
-          audience_id, organization_id, kind, name, description, is_managed, legacy_role_id)
-        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization',
-          'Every active member of the organization', true, $1)`, [allMembersRoleId, organizationId]);
 
       const baseDepartmentName = setup.departmentName?.trim();
       let departmentId: string | null = null;
@@ -1059,43 +1036,37 @@ export class ArdenRepository implements ArdenDataRepository {
         const role = await client.query<{ role_id: string }>(`
           INSERT INTO role (organization_id, code, name, description, is_system)
           VALUES ($1, $2, $3, 'Default role for the base department', false)
-          RETURNING role_id`, [organizationId, `DEPT_DEFAULT_${suffix}`, `${baseDepartmentName} Member`]);
+          RETURNING id AS role_id`, [organizationId, `DEPT_DEFAULT_${suffix}`, `${baseDepartmentName} Member`]);
         departmentRoleId = role.rows[0]?.role_id ?? null;
         if (!departmentRoleId) throw new Error("Default role creation returned no id");
 
         const department = await client.query<{ department_id: string }>(`
           INSERT INTO department (organization_id, code, name, default_role_id)
           VALUES ($1, $2, $3, $4)
-          RETURNING department_id`, [organizationId, `DEPT_${suffix}`, baseDepartmentName, departmentRoleId]);
+          RETURNING id AS department_id`, [organizationId, `DEPT_${suffix}`, baseDepartmentName, departmentRoleId]);
         departmentId = department.rows[0]?.department_id ?? null;
         if (!departmentId) throw new Error("Department creation returned no id");
 
-        await client.query(`INSERT INTO audience (
-            audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id)
-          VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
-            'Every active member of the department', true, $1)`,
-        [departmentRoleId, organizationId, departmentId, departmentAudienceName(baseDepartmentName)]);
-
         await client.query(`
           INSERT INTO role_permission (role_id, permission_id)
-          SELECT $1, permission_id FROM permission
+          SELECT $1, id FROM permission
            WHERE code IN ('PUBLISHED_CONTENT_VIEW', 'PUBLISHED_CONTENT_SEARCH', 'PUBLISHED_CONTENT_CONTRIBUTE',
                           'PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE')
           ON CONFLICT DO NOTHING`, [departmentRoleId]);
 
         const departmentScope = await client.query<{ access_scope_id: string }>(`
-          INSERT INTO access_scope (organization_id, department_id, scope_type)
-          VALUES ($1, $2, 'DEPARTMENT') RETURNING access_scope_id`, [organizationId, departmentId]);
+          INSERT INTO access_scope (organization_id, department_id, scope)
+          VALUES ($1, $2, 'DEPARTMENT') RETURNING id AS access_scope_id`, [organizationId, departmentId]);
         departmentScopeId = departmentScope.rows[0]?.access_scope_id ?? null;
       }
 
       const organizationScope = await client.query<{ access_scope_id: string }>(`
-        INSERT INTO access_scope (organization_id, scope_type)
-        VALUES ($1, 'ORGANIZATION') RETURNING access_scope_id`, [organizationId]);
+        INSERT INTO access_scope (organization_id, scope)
+        VALUES ($1, 'ORGANIZATION') RETURNING id AS access_scope_id`, [organizationId]);
 
       const membership = await client.query<{ membership_id: string }>(`
-        INSERT INTO organization_membership (organization_id, user_id, status)
-        VALUES ($1, $2, 'ACTIVE') RETURNING membership_id`, [organizationId, userId]);
+        INSERT INTO membership (organization_id, account_id, status)
+        VALUES ($1, $2, 'ACTIVE') RETURNING id AS membership_id`, [organizationId, userId]);
       const membershipId = membership.rows[0]?.membership_id;
       if (!membershipId) throw new Error("Creator membership creation returned no id");
 
@@ -1106,18 +1077,18 @@ export class ArdenRepository implements ArdenDataRepository {
         await client.query(`
           INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
           VALUES ($1, $2, $3), ($1,
-            (SELECT role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $4)`,
+            (SELECT id AS role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $4)`,
         [membershipId, departmentRoleId, departmentScopeId, organizationScope.rows[0]?.access_scope_id]);
       } else {
         await client.query(`
           INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
           VALUES ($1,
-            (SELECT role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $2)`,
+            (SELECT id AS role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $2)`,
         [membershipId, organizationScope.rows[0]?.access_scope_id]);
       }
 
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'ORGANIZATION_CREATED', 'SUCCESS', $3::jsonb)`,
       [organizationId, membershipId, JSON.stringify({ departmentId, requestId })]);
 
@@ -1133,34 +1104,34 @@ export class ArdenRepository implements ArdenDataRepository {
 
   async createInvitation(userId: string, organizationId: string, departmentId: string | null | undefined, email: string, tokenHash: string, expiresAt: Date, requestId: string): Promise<CreatedInvitation | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client, inviterMembershipId) => {
-      await client.query(`UPDATE organization_invitation SET status = 'EXPIRED'
+      await client.query(`UPDATE invitation SET status = 'EXPIRED'
         WHERE organization_id = $1 AND email = $2 AND status = 'PENDING' AND expires_at <= now()`, [organizationId, email]);
       let organizationName: string | undefined;
       if (departmentId) {
         const target = await client.query<{ organization_name: string }>(`
           SELECT o.name AS organization_name FROM department d
-          JOIN organization o ON o.organization_id = d.organization_id
-          WHERE d.department_id = $1 AND d.organization_id = $2 AND d.status = 'ACTIVE' AND o.status = 'ACTIVE'`,
+          JOIN organization o ON o.id = d.organization_id
+          WHERE d.id = $1 AND d.organization_id = $2 AND d.status = 'ACTIVE' AND o.status = 'ACTIVE'`,
         [departmentId, organizationId]);
         organizationName = target.rows[0]?.organization_name;
       } else {
         const target = await client.query<{ organization_name: string }>(`
           SELECT name AS organization_name FROM organization
-          WHERE organization_id = $1 AND status = 'ACTIVE'`,
+          WHERE id = $1 AND status = 'ACTIVE'`,
         [organizationId]);
         organizationName = target.rows[0]?.organization_name;
       }
       if (!organizationName) return null;
       const invitation = await client.query<{ invitation_id: string; expires_at: Date }>(`
-        INSERT INTO organization_invitation
-          (organization_id, invited_by_membership_id, department_id, email, token_hash, expires_at)
+        INSERT INTO invitation
+          (organization_id, invited_by_id, department_id, email, token_hash, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING invitation_id, expires_at`,
+        RETURNING id AS invitation_id, expires_at`,
       [organizationId, inviterMembershipId, departmentId ?? null, email, tokenHash, expiresAt]);
       const created = invitation.rows[0];
       if (!created) throw new Error("Invitation creation returned no row");
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'ORGANIZATION_INVITATION_CREATED', 'SUCCESS', $3::jsonb)`,
       [organizationId, inviterMembershipId, JSON.stringify({ invitationId: created.invitation_id, requestId })]);
       return { invitationId: created.invitation_id, email, organizationName, expiresAt: created.expires_at };
@@ -1170,15 +1141,15 @@ export class ArdenRepository implements ArdenDataRepository {
   async rotateInvitation(userId: string, organizationId: string, invitationId: string, tokenHash: string, requestId: string): Promise<CreatedInvitation | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client, inviterMembershipId) => {
       const invitation = await client.query<{ email: string; organization_name: string; expires_at: Date }>(`
-        UPDATE organization_invitation i SET token_hash = $3
+        UPDATE invitation i SET token_hash = $3
           FROM organization o
-         WHERE i.invitation_id = $1 AND i.organization_id = $2 AND i.organization_id = o.organization_id
+         WHERE i.id = $1 AND i.organization_id = $2 AND i.organization_id = o.id
            AND i.status = 'PENDING' AND i.expires_at > now()
         RETURNING i.email, o.name AS organization_name, i.expires_at`, [invitationId, organizationId, tokenHash]);
       const rotated = invitation.rows[0];
       if (!rotated) return null;
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'ORGANIZATION_INVITATION_RESENT', 'SUCCESS', $3::jsonb)`,
       [organizationId, inviterMembershipId, JSON.stringify({ invitationId, requestId })]);
       return { invitationId, email: rotated.email, organizationName: rotated.organization_name, expiresAt: rotated.expires_at };
@@ -1187,11 +1158,11 @@ export class ArdenRepository implements ArdenDataRepository {
 
   async revokeInvitation(userId: string, organizationId: string, invitationId: string, requestId: string): Promise<boolean> {
     return (await this.withOrganizationAdmin(userId, organizationId, async (client, inviterMembershipId) => {
-      const result = await client.query(`UPDATE organization_invitation SET status = 'REVOKED', revoked_at = now()
-        WHERE invitation_id = $1 AND organization_id = $2 AND status = 'PENDING'`, [invitationId, organizationId]);
+      const result = await client.query(`UPDATE invitation SET status = 'REVOKED', revoked_at = now()
+        WHERE id = $1 AND organization_id = $2 AND status = 'PENDING'`, [invitationId, organizationId]);
       if (result.rowCount !== 1) return false;
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'ORGANIZATION_INVITATION_REVOKED', 'SUCCESS', $3::jsonb)`,
       [organizationId, inviterMembershipId, JSON.stringify({ invitationId, requestId })]);
       return true;
@@ -1201,43 +1172,43 @@ export class ArdenRepository implements ArdenDataRepository {
   async getOrganizationAdministration(userId: string, organizationId: string): Promise<OrganizationAdminData | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client) => {
       const departments = await client.query<{ id: string; name: string; code: string; is_base: boolean; default_role_id: string; default_role_name: string }>(`
-        SELECT d.department_id AS id, d.name, d.code, false AS is_base,
-               r.role_id AS default_role_id, r.name AS default_role_name
-          FROM department d JOIN role r ON r.role_id = d.default_role_id
+        SELECT d.id AS id, d.name, d.code, false AS is_base,
+               r.id AS default_role_id, r.name AS default_role_name
+          FROM department d JOIN role r ON r.id = d.default_role_id
          WHERE d.organization_id = $1 AND d.status = 'ACTIVE'
          ORDER BY d.name`, [organizationId]);
       const roles = await client.query<{ id: string; name: string; code: string; is_default: boolean }>(`
-        SELECT r.role_id AS id, r.name, r.code,
-               EXISTS (SELECT 1 FROM department d WHERE d.default_role_id = r.role_id) AS is_default
+        SELECT r.id AS id, r.name, r.code,
+               EXISTS (SELECT 1 FROM department d WHERE d.default_role_id = r.id) AS is_default
           FROM role r WHERE r.organization_id = $1 AND r.status = 'ACTIVE' ORDER BY r.name`, [organizationId]);
       const members = await client.query<{
         id: string; email: string; name: string; status: MembershipStatus; department_id: string | null;
         role_ids: string[] | null; role_names: string[] | null; department_ids: string[]; is_organization_admin: boolean;
       }>(`
-        SELECT om.membership_id AS id, ua.email, ua.full_name AS name, om.status,
+        SELECT om.id AS id, ua.email, ua.full_name AS name, om.status,
                max(dm.department_id::text) FILTER (WHERE dm.is_primary AND dm.status = 'ACTIVE')::uuid AS department_id,
                ARRAY(SELECT all_dm.department_id::text FROM department_membership all_dm
-                 JOIN department all_d USING(department_id)
-                 WHERE all_dm.membership_id = om.membership_id AND all_dm.status = 'ACTIVE'
+                 JOIN department all_d ON all_dm.department_id = all_d.id
+                 WHERE all_dm.membership_id = om.id AND all_dm.status = 'ACTIVE'
                    AND all_d.status = 'ACTIVE' AND all_d.organization_id = $1) AS department_ids,
-               COALESCE(array_agg(DISTINCT r.role_id::text) FILTER (WHERE r.role_id IS NOT NULL), '{}') AS role_ids,
+               COALESCE(array_agg(DISTINCT r.id::text) FILTER (WHERE r.id IS NOT NULL), '{}') AS role_ids,
                COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS role_names,
                COALESCE(bool_or(r.organization_id IS NULL AND r.is_system AND r.code = 'ORG_ADMIN'
-                 AND role_scope.organization_id = $1 AND role_scope.scope_type = 'ORGANIZATION'), false) AS is_organization_admin
-          FROM organization_membership om JOIN user_account ua ON ua.user_id = om.user_id
-          LEFT JOIN department_membership dm ON dm.membership_id = om.membership_id AND dm.is_primary AND dm.status = 'ACTIVE'
-          LEFT JOIN role_assignment ra ON ra.membership_id = om.membership_id AND ra.status = 'ACTIVE'
+                 AND role_scope.organization_id = $1 AND role_scope.scope = 'ORGANIZATION'), false) AS is_organization_admin
+          FROM membership om JOIN account ua ON ua.id = om.account_id
+          LEFT JOIN department_membership dm ON dm.membership_id = om.id AND dm.is_primary AND dm.status = 'ACTIVE'
+          LEFT JOIN role_assignment ra ON ra.membership_id = om.id AND ra.status = 'ACTIVE'
             AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now())
-          LEFT JOIN access_scope role_scope ON role_scope.access_scope_id = ra.access_scope_id
-          LEFT JOIN role r ON r.role_id = ra.role_id AND r.status = 'ACTIVE'
-         WHERE om.organization_id = $1 GROUP BY om.membership_id, ua.email, ua.full_name, om.status
+          LEFT JOIN access_scope role_scope ON role_scope.id = ra.access_scope_id
+          LEFT JOIN role r ON r.id = ra.role_id AND r.status = 'ACTIVE'
+         WHERE om.organization_id = $1 GROUP BY om.id, ua.email, ua.full_name, om.status
          ORDER BY ua.full_name, ua.email`, [organizationId]);
       const invitations = await client.query<{
         id: string; email: string; department_id: string; status: string; expires_at: Date;
-      }>(`SELECT invitation_id AS id, email, department_id,
+      }>(`SELECT id AS id, email, department_id,
                   CASE WHEN status = 'PENDING' AND expires_at <= now() THEN 'EXPIRED' ELSE status END AS status,
                   expires_at
-            FROM organization_invitation WHERE organization_id = $1
+            FROM invitation WHERE organization_id = $1
            ORDER BY created_at DESC LIMIT 200`, [organizationId]);
       return {
         departments: departments.rows.map((row) => ({
@@ -1265,54 +1236,25 @@ export class ArdenRepository implements ArdenDataRepository {
       const membershipId = await this.activeActorMembership(client, userId, organizationId);
       if (!membershipId) return null;
       const departments = await client.query<{ id: string; name: string }>(`
-        SELECT d.department_id AS id, d.name FROM department d
+        SELECT d.id AS id, d.name FROM department d
         WHERE d.organization_id = $1 AND d.status = 'ACTIVE'
           AND (
             current_setting('arden.org_admin', true) = 'true'
             OR EXISTS (
               SELECT 1 FROM department_membership dm
-               WHERE dm.department_id = d.department_id
+               WHERE dm.department_id = d.id
                  AND dm.membership_id = $2
                  AND dm.status = 'ACTIVE'
             )
           )
         ORDER BY d.name`, [organizationId, membershipId]);
-      // Decision 0039: GROUP rows are returned only so legacy drafts and submissions can name the
-      // groups they already carry; groups cannot be managed or newly attached.
-      const audiences = await client.query<{ id: string; name: string; department_id: string | null;
-        kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>(`SELECT audience_id AS id,
-        name, department_id, kind FROM audience WHERE organization_id = $1 AND status = 'ACTIVE'
-          AND (
-            current_setting('arden.org_admin', true) = 'true'
-            OR kind = 'ORGANIZATION_ALL'
-            OR (
-              department_id IS NOT NULL AND EXISTS (
-                SELECT 1 FROM department_membership dm
-                 WHERE dm.department_id = audience.department_id
-                   AND dm.membership_id = $2
-                   AND dm.status = 'ACTIVE'
-              )
-            )
-            OR (
-              kind = 'GROUP' AND EXISTS (
-                SELECT 1 FROM audience_group_membership agm
-                 WHERE agm.audience_id = audience.audience_id
-                   AND agm.membership_id = $2
-                   AND agm.status = 'ACTIVE'
-              )
-            )
-          )
-        ORDER BY kind, name, audience_id`, [organizationId, membershipId]);
       const organizationReviewer = await client.query<{ available: boolean }>(`
         SELECT organization_has_active_reviewer_grant($1) AS available`, [organizationId]);
       return {
         departments: departments.rows,
         primaryDepartmentId: await this.actorPrimaryDepartment(client, userId, organizationId),
         organizationReviewerAvailable: organizationReviewer.rows[0]?.available === true,
-        audiences: audiences.rows.map(audience => ({
-          id: audience.id, name: audience.name, departmentId: audience.department_id,
-          kind: audience.kind,
-        })),
+        audiences: [],
       };
     });
   }
@@ -1322,30 +1264,24 @@ export class ArdenRepository implements ArdenDataRepository {
       const suffix = randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase();
       const role = await client.query<{ role_id: string }>(`
         INSERT INTO role (organization_id, code, name, description, is_system)
-        VALUES ($1, $2, $3, $4, false) RETURNING role_id`,
+        VALUES ($1, $2, $3, $4, false) RETURNING id AS role_id`,
       [organizationId, `DEPT_DEFAULT_${suffix}`, `${name} Member`, `Default role for ${name}`]);
       const roleId = role.rows[0]?.role_id;
       if (!roleId) throw new Error("Department default role creation returned no id");
       const departmentCode = `DEPT_${suffix}`;
       const department = await client.query<{ department_id: string }>(`
         INSERT INTO department (organization_id, code, name, default_role_id)
-        VALUES ($1, $2, $3, $4) RETURNING department_id`, [organizationId, departmentCode, name, roleId]);
+        VALUES ($1, $2, $3, $4) RETURNING id AS department_id`, [organizationId, departmentCode, name, roleId]);
       const departmentId = department.rows[0]?.department_id;
       if (!departmentId) throw new Error("Department creation returned no id");
-      await client.query(`INSERT INTO audience (
-          audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id,
-          created_by_membership_id)
-        VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
-          'Every active member of the department', true, $1, $5)`,
-      [roleId, organizationId, departmentId, departmentAudienceName(name), actorMembershipId]);
       await client.query(`
         INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission
+        SELECT $1, id FROM permission
          WHERE code IN ('PUBLISHED_CONTENT_VIEW', 'PUBLISHED_CONTENT_SEARCH', 'PUBLISHED_CONTENT_CONTRIBUTE',
                         'PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE') ON CONFLICT DO NOTHING`, [roleId]);
-      await client.query(`INSERT INTO access_scope (organization_id, department_id, scope_type) VALUES ($1, $2, 'DEPARTMENT')`, [organizationId, departmentId]);
+      await client.query(`INSERT INTO access_scope (organization_id, department_id, scope) VALUES ($1, $2, 'DEPARTMENT')`, [organizationId, departmentId]);
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'DEPARTMENT_CREATED', 'SUCCESS', $3::jsonb)`,
       [organizationId, actorMembershipId, JSON.stringify({ departmentId, requestId })]);
       return true;
@@ -1355,9 +1291,9 @@ export class ArdenRepository implements ArdenDataRepository {
   async deleteDepartment(userId: string, organizationId: string, departmentId: string, requestId: string): Promise<DeleteDepartmentResult> {
     return (await this.withOrganizationAdmin(userId, organizationId, async (client, actorMembershipId) => {
       const dept = await client.query<{ department_id: string; default_role_id: string; name: string; code: string }>(`
-        SELECT department_id, default_role_id, name, code
+        SELECT id AS department_id, default_role_id, name, code
           FROM department
-         WHERE department_id = $1 AND organization_id = $2 AND status = 'ACTIVE'
+         WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'
          FOR UPDATE`, [departmentId, organizationId]);
       const department = dept.rows[0];
       if (!department) return { success: false, errorReason: "NOT_FOUND" };
@@ -1383,23 +1319,22 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query(`
         UPDATE role_assignment
            SET status = 'REVOKED'
-         WHERE access_scope_id = (SELECT access_scope_id FROM access_scope WHERE department_id = $1 AND organization_id = $2 AND scope_type = 'DEPARTMENT')
+         WHERE access_scope_id = (SELECT id AS access_scope_id FROM access_scope WHERE department_id = $1 AND organization_id = $2 AND scope = 'DEPARTMENT')
            AND status = 'ACTIVE'`, [departmentId, organizationId]);
 
       await client.query(`
-        UPDATE organization_invitation
+        UPDATE invitation
            SET department_id = null
          WHERE department_id = $1 AND organization_id = $2 AND status = 'PENDING'`,
         [departmentId, organizationId]);
 
-      await client.query(`UPDATE department SET status = 'ARCHIVED', updated_at = now() WHERE department_id = $1`, [departmentId]);
-      await client.query(`UPDATE audience SET status = 'INACTIVE', updated_at = now() WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
+      await client.query(`UPDATE department SET status = 'ARCHIVED', updated_at = now() WHERE id = $1`, [departmentId]);
       await client.query(`UPDATE access_scope SET status = 'INACTIVE' WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
       await client.query(`UPDATE reviewer_grant SET status = 'INACTIVE' WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
-      await client.query(`UPDATE role SET status = 'INACTIVE' WHERE role_id = $1`, [department.default_role_id]);
+      await client.query(`UPDATE role SET status = 'INACTIVE' WHERE id = $1`, [department.default_role_id]);
 
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'DEPARTMENT_DELETED', 'SUCCESS', $3::jsonb)`,
         [organizationId, actorMembershipId, JSON.stringify({
           departmentId,
@@ -1419,30 +1354,19 @@ export class ArdenRepository implements ArdenDataRepository {
           FROM department_membership WHERE membership_id = $1`, [membershipId]);
       const currentDepartmentId = member.rows[0]?.current_department_id;
       const target = await client.query<{ default_role_id: string; access_scope_id: string }>(`
-        SELECT d.default_role_id, s.access_scope_id FROM department d JOIN access_scope s
-          ON s.department_id = d.department_id AND s.organization_id = d.organization_id
-         AND s.scope_type = 'DEPARTMENT' AND s.status = 'ACTIVE'
-         WHERE d.department_id = $1 AND d.organization_id = $2 AND d.status = 'ACTIVE'
-           AND EXISTS (SELECT 1 FROM organization_membership om WHERE om.membership_id = $3
+        SELECT d.default_role_id, s.id AS access_scope_id FROM department d JOIN access_scope s
+          ON s.department_id = d.id AND s.organization_id = d.organization_id
+         AND s.scope = 'DEPARTMENT' AND s.status = 'ACTIVE'
+         WHERE d.id = $1 AND d.organization_id = $2 AND d.status = 'ACTIVE'
+           AND EXISTS (SELECT 1 FROM membership om WHERE om.id = $3
                         AND om.organization_id = $2 AND om.status = 'ACTIVE')`, [departmentId, organizationId, membershipId]);
       const assignment = target.rows[0];
       if (!assignment) return false;
       if (currentDepartmentId === departmentId) return true;
       if (currentDepartmentId) {
         await client.query(`UPDATE role_assignment SET status = 'REVOKED'
-          WHERE membership_id = $1 AND role_id = (SELECT default_role_id FROM department WHERE department_id = $2)
+          WHERE membership_id = $1 AND role_id = (SELECT default_role_id FROM department WHERE id = $2)
             AND status = 'ACTIVE'`, [membershipId, currentDepartmentId]);
-        await client.query(`UPDATE role_assignment ra SET status = 'REVOKED'
-          WHERE ra.membership_id = $1
-            AND ra.access_scope_id = (SELECT access_scope_id FROM access_scope
-              WHERE organization_id = $3 AND department_id = $2
-                AND scope_type = 'DEPARTMENT' AND status = 'ACTIVE')
-            AND ra.status = 'ACTIVE'
-            AND EXISTS (SELECT 1 FROM audience_group_membership agm
-              JOIN audience a ON a.audience_id = agm.audience_id
-             WHERE agm.membership_id = $1 AND agm.status = 'ACTIVE'
-               AND a.organization_id = $3 AND a.kind = 'GROUP'
-               AND a.legacy_role_id = ra.role_id)`, [membershipId, currentDepartmentId, organizationId]);
         await client.query(`UPDATE department_membership SET is_primary = false, status = 'REMOVED', removed_at = now()
           WHERE membership_id = $1 AND department_id = $2 AND is_primary AND status = 'ACTIVE'`, [membershipId, currentDepartmentId]);
       }
@@ -1454,17 +1378,8 @@ export class ArdenRepository implements ArdenDataRepository {
         [membershipId, departmentId]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [membershipId, assignment.default_role_id, assignment.access_scope_id]);
-      await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        SELECT $1, a.legacy_role_id, $2
-          FROM audience_group_membership agm
-          JOIN audience a ON a.audience_id = agm.audience_id
-         WHERE agm.membership_id = $1 AND agm.status = 'ACTIVE'
-           AND agm.valid_from <= now() AND (agm.valid_until IS NULL OR agm.valid_until > now())
-           AND a.organization_id = $3 AND a.kind = 'GROUP' AND a.status = 'ACTIVE'
-           AND a.legacy_role_id IS NOT NULL
-        ON CONFLICT DO NOTHING`, [membershipId, assignment.access_scope_id, organizationId]);
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'PRIMARY_DEPARTMENT_CHANGED', 'SUCCESS', $3::jsonb)`,
       [organizationId, actorMembershipId, JSON.stringify({ membershipId, departmentId, requestId })]);
       return true;
@@ -1481,8 +1396,8 @@ export class ArdenRepository implements ArdenDataRepository {
                                  set_config('arden.organization_id', '', true),
                                  set_config('arden.invitation_token_hash', $1, true)`, [tokenHash]);
       const found = await client.query<{ invitation_id: string; organization_id: string; email: string; expires_at: Date }>(`
-        SELECT invitation_id, organization_id, email, expires_at
-          FROM organization_invitation
+        SELECT id AS invitation_id, organization_id, email, expires_at
+          FROM invitation
          WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > now()`, [tokenHash]);
       const invitation = found.rows[0];
       if (!invitation) {
@@ -1491,7 +1406,7 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       await client.query("SELECT set_config('arden.organization_id', $1, true)", [invitation.organization_id]);
       const orgResult = await client.query<{ name: string }>(`
-        SELECT name FROM organization WHERE organization_id = $1 AND status = 'ACTIVE'`, [invitation.organization_id]);
+        SELECT name FROM organization WHERE id = $1 AND status = 'ACTIVE'`, [invitation.organization_id]);
       const organizationName = orgResult.rows[0]?.name ?? "Arden Organization";
       await client.query("COMMIT");
       return {
@@ -1520,13 +1435,13 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`
-        INSERT INTO user_account (user_id, email, full_name)
+        INSERT INTO account (id, email, full_name)
         VALUES ($1, $2, $3)
-        ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
+        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
       [userId, email, profileName]);
       const found = await client.query<{ invitation_id: string; organization_id: string; department_id: string | null; invited_email: string }>(`
-        SELECT invitation_id, organization_id, department_id, email AS invited_email
-          FROM organization_invitation
+        SELECT id AS invitation_id, organization_id, department_id, email AS invited_email
+          FROM invitation
          WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > now()
          FOR UPDATE`, [tokenHash]);
       const invitation = found.rows[0];
@@ -1537,8 +1452,8 @@ export class ArdenRepository implements ArdenDataRepository {
       const { organization_id: organizationId, department_id: departmentId, invitation_id: invitationId } = invitation;
       await client.query("SELECT set_config('arden.organization_id', $1, true)", [organizationId]);
       const membership = await client.query<{ membership_id: string }>(`
-        INSERT INTO organization_membership (organization_id, user_id, status)
-        VALUES ($1, $2, 'ACTIVE') RETURNING membership_id`, [organizationId, userId]);
+        INSERT INTO membership (organization_id, account_id, status)
+        VALUES ($1, $2, 'ACTIVE') RETURNING id AS membership_id`, [organizationId, userId]);
       const membershipId = membership.rows[0]?.membership_id;
       if (!membershipId) throw new Error("Invitation membership creation returned no row");
       if (departmentId) {
@@ -1546,21 +1461,21 @@ export class ArdenRepository implements ArdenDataRepository {
           INSERT INTO department_membership (membership_id, department_id, is_primary, status)
           VALUES ($1, $2, true, 'ACTIVE')`, [membershipId, departmentId]);
         const defaultRole = await client.query<{ role_id: string; access_scope_id: string }>(`
-          SELECT d.default_role_id AS role_id, s.access_scope_id
+          SELECT d.default_role_id AS role_id, s.id AS access_scope_id
             FROM department d JOIN access_scope s
-              ON s.department_id = d.department_id AND s.organization_id = d.organization_id
-             AND s.scope_type = 'DEPARTMENT' AND s.status = 'ACTIVE'
-           WHERE d.department_id = $1 AND d.organization_id = $2 AND d.status = 'ACTIVE'`, [departmentId, organizationId]);
+              ON s.department_id = d.id AND s.organization_id = d.organization_id
+             AND s.scope = 'DEPARTMENT' AND s.status = 'ACTIVE'
+           WHERE d.id = $1 AND d.organization_id = $2 AND d.status = 'ACTIVE'`, [departmentId, organizationId]);
         const assignment = defaultRole.rows[0];
         if (!assignment) throw new Error("Invitation department default role is unavailable");
         await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3)`,
           [membershipId, assignment.role_id, assignment.access_scope_id]);
       }
       await client.query(`
-        UPDATE organization_invitation SET status = 'ACCEPTED', accepted_by_user_id = $2, accepted_at = now()
-         WHERE invitation_id = $1`, [invitationId, userId]);
+        UPDATE invitation SET status = 'ACCEPTED', accepted_by_account_id = $2, accepted_at = now()
+         WHERE id = $1`, [invitationId, userId]);
       await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
         VALUES ($1, $2, 'ORGANIZATION_INVITATION_ACCEPTED', 'SUCCESS', $3::jsonb)`,
       [organizationId, membershipId, JSON.stringify({ invitationId, requestId })]);
       await client.query("COMMIT");
@@ -1582,15 +1497,15 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [userId, organizationId]);
       const admin = await client.query<{ membership_id: string }>(`
-        SELECT om.membership_id FROM organization_membership om
-        JOIN role_assignment ra ON ra.membership_id = om.membership_id AND ra.status = 'ACTIVE'
+        SELECT om.id AS membership_id FROM membership om
+        JOIN role_assignment ra ON ra.membership_id = om.id AND ra.status = 'ACTIVE'
           AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now())
-        JOIN role r ON r.role_id = ra.role_id AND r.code = 'ORG_ADMIN' AND r.is_system AND r.status = 'ACTIVE'
-        JOIN access_scope s ON s.access_scope_id = ra.access_scope_id AND s.organization_id = om.organization_id
-          AND s.scope_type = 'ORGANIZATION' AND s.status = 'ACTIVE'
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-        WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+        JOIN role r ON r.id = ra.role_id AND r.code = 'ORG_ADMIN' AND r.is_system AND r.status = 'ACTIVE'
+        JOIN access_scope s ON s.id = ra.access_scope_id AND s.organization_id = om.organization_id
+          AND s.scope = 'ORGANIZATION' AND s.status = 'ACTIVE'
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+        WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
       const membershipId = admin.rows[0]?.membership_id;
       if (!membershipId) {
         await client.query("ROLLBACK");
@@ -1612,9 +1527,9 @@ export class ArdenRepository implements ArdenDataRepository {
   async registerAccountProfile(userId: string, email: string, fullName: string | null): Promise<boolean> {
     return this.withActorContext(userId, null, async client => {
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
-      await client.query(`INSERT INTO user_account (user_id, email, full_name)
+      await client.query(`INSERT INTO account (id, email, full_name)
         VALUES ($1, $2, $3)
-        ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
+        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
       [userId, email, profileName]);
       return true;
     });
@@ -1651,15 +1566,15 @@ export class ArdenRepository implements ArdenDataRepository {
       favorited_at: Date | null;
       sort_position: number | null;
     }>(`
-      SELECT d.draft_id, d.title, d.current_version_no, v.draft_version_id, v.mime_type, v.content_hash,
-             d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position
-        FROM draft_document d
-        JOIN private_workspace w ON w.workspace_id = d.workspace_id
-        JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
+      SELECT d.id AS draft_id, d.title, d.current_version_no, v.id AS draft_version_id, v.mime_type, v.content_hash,
+             d.created_at, d.updated_at, d.folder_id AS collection_id, d.favorited_at, d.position AS sort_position
+        FROM private_document d
+        JOIN private_workspace w ON w.id = d.workspace_id
+        JOIN private_version v ON v.document_id = d.id AND v.version_no = d.current_version_no
        WHERE w.membership_id = $1 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
          AND d.archived_at IS NULL
-         AND ($2::timestamptz IS NULL OR (d.updated_at, d.draft_id) < ($2, $3::uuid))
-       ORDER BY d.updated_at DESC, d.draft_id DESC
+         AND ($2::timestamptz IS NULL OR (d.updated_at, d.id) < ($2, $3::uuid))
+       ORDER BY d.updated_at DESC, d.id DESC
        LIMIT $4`, [membershipId, cursor?.updatedAt ?? null, cursor?.draftId ?? null, limit + 1]);
 
     const hasNextPage = result.rows.length > limit;
@@ -1702,18 +1617,18 @@ export class ArdenRepository implements ArdenDataRepository {
       text_source_uri: string | null;
       text_content_hash: string | null;
     }>(`
-      SELECT d.draft_id, v.draft_version_id, d.title, v.source_uri, v.mime_type, v.content_hash,
-             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
-             v.text_source_uri, v.text_content_hash
-        FROM draft_document d
-        JOIN private_workspace w ON w.workspace_id = d.workspace_id
-        JOIN organization_membership om ON om.membership_id = w.membership_id
-        JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
-       WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
+      SELECT d.id AS draft_id, v.id AS draft_version_id, d.title, v.file_uri AS source_uri, v.mime_type, v.content_hash,
+             d.current_version_no, d.created_at, d.updated_at, d.folder_id AS collection_id, d.favorited_at, d.position AS sort_position,
+             v.text_uri AS text_source_uri, v.text_content_hash
+        FROM private_document d
+        JOIN private_workspace w ON w.id = d.workspace_id
+        JOIN membership om ON om.id = w.membership_id
+        JOIN private_version v ON v.document_id = d.id AND v.version_no = d.current_version_no
+       WHERE d.id = $1 AND om.organization_id = $2 AND om.account_id = $3
          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
          AND (NOT $5::boolean OR (d.archived_at IS NULL AND EXISTS (
-           SELECT 1 FROM organization o JOIN user_account ua ON ua.user_id = om.user_id
-            WHERE o.organization_id = om.organization_id AND o.status = 'ACTIVE' AND ua.status = 'ACTIVE'
+           SELECT 1 FROM organization o JOIN account ua ON ua.id = om.account_id
+            WHERE o.id = om.organization_id AND o.status = 'ACTIVE' AND ua.status = 'ACTIVE'
          )))
          AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ", options?.forQuestion ?? false]);
     const row = result.rows[0];
@@ -1755,14 +1670,13 @@ export class ArdenRepository implements ArdenDataRepository {
         .update(`${input.sourceVersionId}:${input.classification}`)
         .digest("hex");
       // Decision 0031: serialize with saves of the source note, which may overwrite an open version.
-      await client.query(`SELECT 1 FROM draft_version v JOIN draft_document d ON d.draft_id = v.draft_id
-        WHERE v.draft_version_id = $1 FOR UPDATE OF d, v`, [input.sourceVersionId]);
+      await client.query(`SELECT 1 FROM private_version v JOIN private_document d ON d.id = v.document_id
+        WHERE v.id = $1 FOR UPDATE OF d, v`, [input.sourceVersionId]);
       const source = await this.findPrivateContributionSource(client, userId, organizationId, input.sourceVersionId);
-      if (!source || !canCreateSharedDraft({
-        actor: { membershipId: input.actorMembershipId, organizationId, status: "ACTIVE" },
-        source: { kind: "private", organizationId: source.organizationId, ownerMembershipId: source.ownerMembershipId },
-        now: new Date(),
-      })) return { kind: "unavailable" };
+      if (!source || !canContributePrivateDocument(
+        { membershipId: input.actorMembershipId, organizationId, status: "ACTIVE" },
+        source,
+      )) return { kind: "unavailable" };
       if (source.sourceUri !== input.expectedSource.sourceUri || source.contentHash !== input.expectedSource.contentHash
         || !(source.mimeType === "text/plain" || source.mimeType === "application/pdf")
         || input.copiedContent.mimeType !== source.mimeType
@@ -1773,11 +1687,11 @@ export class ArdenRepository implements ArdenDataRepository {
         ? { kind: "replayed", draft: existing.draft } : { kind: "idempotency-conflict" };
 
       const inserted = await client.query<{ shared_draft_id: string }>(`
-        INSERT INTO shared_draft (organization_id, author_membership_id, source_private_version_id,
+        INSERT INTO company_document (organization_id, author_id, source_private_version_id,
                                   title, classification, create_request_id, create_request_hash)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (author_membership_id, create_request_id) WHERE create_request_id IS NOT NULL DO NOTHING
-        RETURNING shared_draft_id`, [organizationId, source.ownerMembershipId, input.sourceVersionId,
+        ON CONFLICT (author_id, create_request_id) WHERE create_request_id IS NOT NULL DO NOTHING
+        RETURNING id AS shared_draft_id`, [organizationId, source.ownerMembershipId, input.sourceVersionId,
         source.title, input.classification, input.idempotencyKey, createRequestHash]);
       const draftId = inserted.rows[0]?.shared_draft_id;
       if (!draftId) {
@@ -1788,11 +1702,11 @@ export class ArdenRepository implements ArdenDataRepository {
       }
 
       await client.query(`
-        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        INSERT INTO working_version (document_id, version_no, file_uri, mime_type, content_hash, size_bytes)
         VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.copiedContent.sourceUri,
         input.copiedContent.mimeType, input.copiedContent.contentHash, input.copiedContent.contentSizeBytes ?? null]);
       // The contributed wording must stay exactly as reviewed: later saves start a new private version.
-      await client.query(`UPDATE draft_version SET sealed_at = now() WHERE draft_version_id = $1 AND sealed_at IS NULL`,
+      await client.query(`UPDATE private_version SET sealed_at = now() WHERE id = $1 AND sealed_at IS NULL`,
         [input.sourceVersionId]);
       await this.appendAudit(client, organizationId, source.ownerMembershipId,
         "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
@@ -1812,10 +1726,10 @@ export class ArdenRepository implements ArdenDataRepository {
   }): Promise<CreateSharedDraftResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const membership = await client.query<{ membership_id: string }>(`
-        SELECT om.membership_id FROM organization_membership om
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+        SELECT om.id AS membership_id FROM membership om
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
       if (membership.rows[0]?.membership_id !== input.actorMembershipId) return { kind: "unavailable" };
       const createRequestHash = createHash("sha256")
         .update(JSON.stringify([input.title, input.classification, input.content.contentHash]))
@@ -1824,11 +1738,11 @@ export class ArdenRepository implements ArdenDataRepository {
       if (existing) return existing.createRequestHash === createRequestHash
         ? { kind: "replayed", draft: existing.draft } : { kind: "idempotency-conflict" };
       const inserted = await client.query<{ shared_draft_id: string }>(`
-        INSERT INTO shared_draft (organization_id, author_membership_id, title, classification,
+        INSERT INTO company_document (organization_id, author_id, title, classification,
                                   create_request_id, create_request_hash)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (author_membership_id, create_request_id) WHERE create_request_id IS NOT NULL DO NOTHING
-        RETURNING shared_draft_id`, [organizationId, input.actorMembershipId, input.title, input.classification,
+        ON CONFLICT (author_id, create_request_id) WHERE create_request_id IS NOT NULL DO NOTHING
+        RETURNING id AS shared_draft_id`, [organizationId, input.actorMembershipId, input.title, input.classification,
         input.idempotencyKey, createRequestHash]);
       const draftId = inserted.rows[0]?.shared_draft_id;
       if (!draftId) {
@@ -1838,7 +1752,7 @@ export class ArdenRepository implements ArdenDataRepository {
           ? { kind: "replayed", draft: raced.draft } : { kind: "idempotency-conflict" };
       }
       await client.query(`
-        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        INSERT INTO working_version (document_id, version_no, file_uri, mime_type, content_hash, size_bytes)
         VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.content.sourceUri, input.content.mimeType,
         input.content.contentHash, input.content.contentSizeBytes ?? null]);
       await this.appendAudit(client, organizationId, input.actorMembershipId,
@@ -1852,13 +1766,13 @@ export class ArdenRepository implements ArdenDataRepository {
   async listKnowledgeDrafts(userId: string, organizationId: string): Promise<SharedKnowledgeDraft[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const membership = await client.query(`
-        SELECT 1 FROM organization_membership om
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-        WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+        SELECT 1 FROM membership om
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+        WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
       if (membership.rowCount === 0) return null;
       const result = await client.query<SharedDraftRow>(`${sharedDraftSelect}
-        WHERE d.organization_id = $1 ORDER BY d.updated_at DESC, d.shared_draft_id DESC LIMIT 100`, [organizationId]);
+        WHERE d.organization_id = $1 ORDER BY d.updated_at DESC, d.id DESC LIMIT 100`, [organizationId]);
       return result.rows.map((row) => mapSharedDraft(row, organizationId));
     });
   }
@@ -1866,23 +1780,23 @@ export class ArdenRepository implements ArdenDataRepository {
   async getKnowledgeDraft(userId: string, organizationId: string, draftId: string): Promise<SharedKnowledgeDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const result = await client.query<SharedDraftRow>(`${sharedDraftSelect}
-        WHERE d.organization_id = $1 AND d.shared_draft_id = $2`, [organizationId, draftId]);
+        WHERE d.organization_id = $1 AND d.id = $2`, [organizationId, draftId]);
       return result.rows[0] ? mapSharedDraft(result.rows[0], organizationId) : null;
     });
   }
 
   async listKnowledgeDraftVersions(userId: string, organizationId: string, draftId: string): Promise<KnowledgeDraftVersion[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
-      const draft = await client.query(`SELECT 1 FROM shared_draft
-        WHERE organization_id = $1 AND shared_draft_id = $2`, [organizationId, draftId]);
+      const draft = await client.query(`SELECT 1 FROM company_document
+        WHERE organization_id = $1 AND id = $2`, [organizationId, draftId]);
       if (draft.rowCount === 0) return null;
       const result = await client.query<{ shared_draft_version_id: string; version_no: number;
         content_uri: string; mime_type: string; content_hash: string; created_at: Date }>(`
-        SELECT v.shared_draft_version_id, v.version_no, v.content_uri, v.mime_type,
+        SELECT v.id AS shared_draft_version_id, v.version_no, v.file_uri AS content_uri, v.mime_type,
                v.content_hash, v.created_at
-          FROM shared_draft_version v
-          JOIN shared_draft d ON d.shared_draft_id = v.shared_draft_id
-         WHERE d.organization_id = $1 AND d.shared_draft_id = $2
+          FROM working_version v
+          JOIN company_document d ON d.id = v.document_id
+         WHERE d.organization_id = $1 AND d.id = $2
          ORDER BY v.version_no DESC`, [organizationId, draftId]);
       return result.rows.map((row) => ({ id: row.shared_draft_version_id, version: row.version_no,
         sourceUri: row.content_uri, mimeType: row.mime_type, contentHash: row.content_hash,
@@ -1895,12 +1809,12 @@ export class ArdenRepository implements ArdenDataRepository {
     return this.withActorContext(userId, organizationId, async (client) => {
       const result = await client.query<{ shared_draft_version_id: string; version_no: number;
         content_uri: string; mime_type: string; content_hash: string; created_at: Date }>(`
-        SELECT v.shared_draft_version_id, v.version_no, v.content_uri, v.mime_type,
+        SELECT v.id AS shared_draft_version_id, v.version_no, v.file_uri AS content_uri, v.mime_type,
                v.content_hash, v.created_at
-          FROM shared_draft_version v
-          JOIN shared_draft d ON d.shared_draft_id = v.shared_draft_id
-         WHERE d.organization_id = $1 AND d.shared_draft_id = $2
-           AND v.shared_draft_version_id = $3`, [organizationId, draftId, versionId]);
+          FROM working_version v
+          JOIN company_document d ON d.id = v.document_id
+         WHERE d.organization_id = $1 AND d.id = $2
+           AND v.id = $3`, [organizationId, draftId, versionId]);
       const row = result.rows[0];
       return row ? { id: row.shared_draft_version_id, version: row.version_no,
         sourceUri: row.content_uri, mimeType: row.mime_type, contentHash: row.content_hash,
@@ -1912,7 +1826,7 @@ export class ArdenRepository implements ArdenDataRepository {
     patch: SharedDraftPatch, content: StoredContentFields | null, requestId: string): Promise<UpdateSharedDraftResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const selected = await client.query<SharedDraftRow>(`${sharedDraftSelect}
-        WHERE d.organization_id = $1 AND d.shared_draft_id = $2 AND d.status = 'ACTIVE' FOR UPDATE OF d`,
+        WHERE d.organization_id = $1 AND d.id = $2 AND d.status = 'ACTIVE' FOR UPDATE OF d`,
       [organizationId, draftId]);
       const row = selected.rows[0];
       if (!row) return { kind: "not-found" };
@@ -1933,42 +1847,18 @@ export class ArdenRepository implements ArdenDataRepository {
         classification: patch.classification ?? current.classification,
         responsibleDepartmentId: responsible.departmentId,
         targetScopeType: patch.targetScopeType === undefined ? current.targetScopeType : patch.targetScopeType,
-        teamTag: patch.teamTag === undefined ? current.teamTag : patch.teamTag,
-        projectTag: patch.projectTag === undefined ? current.projectTag : patch.projectTag,
-        audienceRoleIds: patch.audienceRoleIds ?? current.audienceRoleIds,
       };
       const effectiveReaders = patch.targetReaders ?? current.targetReaders;
-      if (management?.schemaVersion === 1 && effectiveReaders) {
-        // Compatibility audience is a database backstop, not the new reader
-        // entitlement. Limited proposals keep the author's department reviewer.
+      if (patch.audienceRoleIds?.length || patch.teamTag != null || patch.projectTag != null) return { kind: "invalid-metadata" };
+      if (effectiveReaders) {
+        // Limited proposals keep the author's department reviewer. The
+        // Target Readers selection is the source of access for this draft.
         next.targetScopeType = effectiveReaders.mode === "ORGANIZATION" ? "ORGANIZATION" : "DEPARTMENT";
-        const audiences = await client.query<{ id: string }>(`SELECT audience_id AS id FROM audience
-          WHERE organization_id = $1 AND status = 'ACTIVE' AND
-          (($2 = 'ORGANIZATION' AND kind = 'ORGANIZATION_ALL') OR
-           ($2 = 'DEPARTMENT' AND kind = 'DEPARTMENT_ALL' AND department_id = $3))`,
-        [organizationId, next.targetScopeType, next.responsibleDepartmentId]);
-        next.audienceRoleIds = audiences.rows.map(audience => audience.id);
-        next.teamTag = null; next.projectTag = null;
       }
       if (next.responsibleDepartmentId) {
-        const department = await client.query(`SELECT 1 FROM department WHERE department_id = $1
+        const department = await client.query(`SELECT 1 FROM department WHERE id = $1
           AND organization_id = $2 AND status = 'ACTIVE'`, [next.responsibleDepartmentId, organizationId]);
         if (department.rowCount === 0) return { kind: "invalid-metadata" };
-      }
-      if (next.audienceRoleIds.length > 100 || new Set(next.audienceRoleIds).size !== next.audienceRoleIds.length) {
-        return { kind: "invalid-metadata" };
-      }
-      if (next.audienceRoleIds.length > 0) {
-        // Decision 0039: reader groups can no longer be added. A legacy draft may keep the GROUP
-        // audiences it already had, so saving it does not fail, but no new group can be attached.
-        const audiences = await client.query(`SELECT audience_id FROM audience
-          WHERE organization_id = $1 AND audience_id = ANY($2::uuid[]) AND status = 'ACTIVE'
-            AND ((kind = 'ORGANIZATION_ALL' AND $3 = 'ORGANIZATION')
-              OR (kind = 'DEPARTMENT_ALL' AND $3 = 'DEPARTMENT' AND department_id = $4)
-              OR (kind = 'GROUP' AND audience_id = ANY($5::uuid[])))`,
-        [organizationId, next.audienceRoleIds, next.targetScopeType, next.responsibleDepartmentId,
-          current.audienceRoleIds]);
-        if (audiences.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
       }
       let draftSelectionId: string | null = null;
       if (patch.targetReaders !== undefined) {
@@ -1978,34 +1868,26 @@ export class ArdenRepository implements ArdenDataRepository {
         draftSelectionId = await this.insertReaderSelection(client, organizationId, validation.selection,
           (row.draft_selection_revision ?? 0) + 1);
       }
-      await client.query(`UPDATE shared_draft SET title = $3, classification = $4,
-        responsible_department_id = $5, target_scope_type = $6, team_tag = $7, project_tag = $8,
-        draft_selection_id = COALESCE($9::uuid, draft_selection_id)
-        , management = $10::jsonb
-        WHERE shared_draft_id = $1 AND organization_id = $2`, [draftId, organizationId, next.title,
-        next.classification, next.responsibleDepartmentId, next.targetScopeType, next.teamTag, next.projectTag,
+      await client.query(`UPDATE company_document SET title = $3, classification = $4,
+        owner_department_id = $5, target_scope = $6,
+        reader_policy_id = COALESCE($7::uuid, reader_policy_id), metadata = $8::jsonb
+        WHERE id = $1 AND organization_id = $2`, [draftId, organizationId, next.title,
+        next.classification, next.responsibleDepartmentId, next.targetScopeType,
         draftSelectionId, management ? JSON.stringify(management) : null]);
-      if (patch.audienceRoleIds !== undefined || patch.targetReaders !== undefined || management?.schemaVersion === 1) {
-        await client.query(`DELETE FROM shared_draft_audience WHERE shared_draft_id = $1`, [draftId]);
-        if (next.audienceRoleIds.length > 0) {
-          await client.query(`INSERT INTO shared_draft_audience (shared_draft_id, organization_id, role_id)
-            SELECT $1, $2, unnest($3::uuid[])`, [draftId, organizationId, next.audienceRoleIds]);
-        }
-      }
       const object = content ?? { sourceUri: current.sourceUri, mimeType: current.mimeType,
         contentHash: current.contentHash, contentSizeBytes: current.contentSizeBytes };
-      await client.query(`INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+      await client.query(`INSERT INTO working_version (document_id, version_no, file_uri, mime_type, content_hash, size_bytes)
         VALUES ($1, $2, $3, $4, $5, $6)`, [draftId, expectedVersion + 1,
         object.sourceUri, object.mimeType, object.contentHash, object.contentSizeBytes ?? null]);
       const membership = await client.query<{ membership_id: string }>(`
-        SELECT membership_id FROM organization_membership WHERE user_id = $1 AND organization_id = $2
+        SELECT id AS membership_id FROM membership WHERE account_id = $1 AND organization_id = $2
           AND status = 'ACTIVE'`, [userId, organizationId]);
       const membershipId = membership.rows[0]?.membership_id;
       if (!membershipId) throw new Error("Shared draft author membership disappeared");
       await this.appendAudit(client, organizationId, membershipId, "SHARED_DRAFT_UPDATED", draftId,
         expectedVersion + 1, requestId);
       const updated = await client.query<SharedDraftRow>(`${sharedDraftSelect}
-        WHERE d.organization_id = $1 AND d.shared_draft_id = $2`, [organizationId, draftId]);
+        WHERE d.organization_id = $1 AND d.id = $2`, [organizationId, draftId]);
       if (!updated.rows[0]) throw new Error("Updated shared draft is not readable");
       return { kind: "updated", draft: mapSharedDraft(updated.rows[0], organizationId) };
     });
@@ -2021,7 +1903,7 @@ export class ArdenRepository implements ArdenDataRepository {
         ? { kind: "replayed", submission: mapSharedSubmission(replay.rows[0]) }
         : { kind: "conflict" };
       const selected = await client.query<SharedDraftRow>(`${sharedDraftSelect}
-        WHERE d.organization_id = $1 AND d.shared_draft_id = $2 AND d.status = 'ACTIVE' FOR UPDATE OF d`,
+        WHERE d.organization_id = $1 AND d.id = $2 AND d.status = 'ACTIVE' FOR UPDATE OF d`,
       [organizationId, draftId]);
       const row = selected.rows[0];
       if (!row || !(await this.activeActorMembership(client, userId, organizationId, row.author_membership_id))) {
@@ -2030,64 +1912,58 @@ export class ArdenRepository implements ArdenDataRepository {
       if (row.current_version_no !== expectedVersion) return { kind: "conflict" };
       if (!row.management || metadataSubmissionErrors(row.management, row.has_published_version).length
         || !row.readers_selection_id) return { kind: "not-ready" };
-      const reusedVersion = await client.query(`SELECT 1 FROM shared_submission WHERE shared_draft_id = $1
-        AND publication_state IN ('ACTIVE', 'SUPERSEDED') AND management->>'version' = $2`, [draftId, row.management.version]);
+      const reusedVersion = await client.query(`SELECT 1 FROM review_submission WHERE document_id = $1
+        AND publication_state IN ('ACTIVE', 'SUPERSEDED') AND metadata->>'version' = $2`, [draftId, row.management.version]);
       if (reusedVersion.rowCount) return { kind: "not-ready" };
-      if (!row.responsible_department_id || !row.target_scope_type) return { kind: "not-ready" };
-      const audiences = await client.query<{ audience_id: string; organization_id: string;
-        status: "ACTIVE" | "INACTIVE"; kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP";
-        department_id: string | null }>(`SELECT audience_id, organization_id, status, kind, department_id
-        FROM audience WHERE organization_id = $1 AND audience_id = ANY($2::uuid[])`,
-      [organizationId, row.audience_role_ids]);
-      const ready = canSubmitSnapshot({
+      if (!row.responsible_department_id) return { kind: "not-ready" };
+      const proposedReaders = mapReaderSelection(row);
+      if (!proposedReaders) return { kind: "not-ready" };
+      const reviewScope = proposedReaders.mode === "ORGANIZATION" ? "ORGANIZATION" : "DEPARTMENT";
+      const selection = validateSelection({
+        mode: proposedReaders.mode,
+        ...(proposedReaders.departmentId !== null ? { departmentId: proposedReaders.departmentId } : {}),
+        ...(proposedReaders.memberIds.length > 0 ? { memberIds: proposedReaders.memberIds } : {}),
+      }, await this.loadSelectionFacts(client, organizationId, proposedReaders));
+      const ready = canSubmitReaderSnapshot({
         responsibleDepartmentId: row.responsible_department_id,
         authorPrimaryDepartmentId: await this.actorPrimaryDepartment(client, userId, organizationId),
         actor: { membershipId: row.author_membership_id, organizationId, status: "ACTIVE" },
         draft: { organizationId, authorMembershipId: row.author_membership_id, status: row.status,
           currentVersionId: row.shared_draft_version_id },
         snapshot: { versionId: row.shared_draft_version_id, contentHash: row.content_hash,
-          classification: row.classification, audienceIds: row.audience_role_ids,
-          scope: row.target_scope_type === "ORGANIZATION"
-            ? { type: "ORGANIZATION", departmentId: null }
-            : { type: "DEPARTMENT", departmentId: row.responsible_department_id } },
-        audiences: audiences.rows.map(audience => ({ audienceId: audience.audience_id,
-          organizationId: audience.organization_id, status: audience.status, kind: audience.kind,
-          departmentId: audience.department_id })),
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
-          row.target_scope_type, row.responsible_department_id),
+          classification: row.classification },
       });
       const department = await client.query(`SELECT 1 FROM department
-        WHERE department_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [row.responsible_department_id, organizationId]);
-      if (!ready || department.rowCount === 0) return { kind: "not-ready" };
-      const pending = await client.query(`SELECT 1 FROM shared_submission
-        WHERE shared_draft_id = $1 AND status = 'PENDING_REVIEW'`, [draftId]);
+        WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [row.responsible_department_id, organizationId]);
+      if (!ready || !selection.ok || department.rowCount === 0) return { kind: "not-ready" };
+      const pending = await client.query(`SELECT 1 FROM review_submission
+        WHERE document_id = $1 AND status = 'PENDING_REVIEW'`, [draftId]);
       if (pending.rowCount !== 0) return { kind: "conflict" };
-      const alreadySubmitted = await client.query(`SELECT 1 FROM shared_submission
-        WHERE shared_draft_version_id = $1`, [row.shared_draft_version_id]);
+      const alreadySubmitted = await client.query(`SELECT 1 FROM review_submission
+        WHERE working_version_id = $1`, [row.shared_draft_version_id]);
       if (alreadySubmitted.rowCount !== 0) return { kind: "conflict" };
       const submitted = await client.query<{ submission_id: string }>(`
-        INSERT INTO shared_submission (organization_id, shared_draft_id, shared_draft_version_id,
+        INSERT INTO review_submission (organization_id, document_id, working_version_id,
           snapshot_version_no,
-          submitted_by_membership_id, target_scope_type, target_department_id,
-          responsible_department_id, title, classification, team_tag, project_tag,
-          audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id,
-          proposed_selection_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-          $13::uuid[], 1, $14, $15, $16, $17, $18::uuid)
-        RETURNING submission_id`, [organizationId, draftId, row.shared_draft_version_id,
-        row.current_version_no, row.author_membership_id, row.target_scope_type,
-        row.target_scope_type === "DEPARTMENT" ? row.responsible_department_id : null,
-        row.responsible_department_id, row.title, row.classification, row.team_tag, row.project_tag,
-        row.audience_role_ids, row.content_uri, row.mime_type, row.content_hash, idempotencyKey,
+          submitted_by_id, target_scope, target_department_id,
+          owner_department_id, title, classification,
+          policy_version, file_uri, mime_type, content_hash, submit_request_id, proposed_reader_policy_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          1, $11, $12, $13, $14, $15::uuid)
+        RETURNING id AS submission_id`, [organizationId, draftId, row.shared_draft_version_id,
+        row.current_version_no, row.author_membership_id, reviewScope,
+        reviewScope === "DEPARTMENT" ? row.responsible_department_id : null,
+        row.responsible_department_id, row.title, row.classification,
+        row.content_uri, row.mime_type, row.content_hash, idempotencyKey,
         // T1.4: the draft selection is frozen as the proposed readers; selections are immutable rows.
         row.readers_selection_id]);
       const submissionId = submitted.rows[0]?.submission_id;
       if (!submissionId) throw new Error("Submission insert returned no identifier");
-      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
-        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_SUBMITTED', 'SUCCESS', $3::jsonb)`, [organizationId,
+      await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type,
+        outcome, details) VALUES ($1, $2, 'KNOWLEDGE_SUBMITTED', 'SUCCESS', $3::jsonb)`, [organizationId,
         row.author_membership_id, JSON.stringify({ submissionId, draftId, snapshotVersionId: row.shared_draft_version_id, requestId })]);
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.submission_id = $1`, [submissionId]);
+        WHERE s.id = $1`, [submissionId]);
       if (!result.rows[0]) throw new Error("Submitted snapshot is not readable");
       return { kind: "submitted", submission: mapSharedSubmission(result.rows[0]) };
     });
@@ -2098,8 +1974,8 @@ export class ArdenRepository implements ArdenDataRepository {
       const membership = await this.activeActorMembership(client, userId, organizationId);
       if (!membership) return null;
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
-        ORDER BY s.submitted_at DESC, s.submission_id DESC LIMIT 100`, [organizationId, membership]);
+        WHERE s.organization_id = $1 AND s.submitted_by_id = $2
+        ORDER BY s.submitted_at DESC, s.id DESC LIMIT 100`, [organizationId, membership]);
       return result.rows.map(mapSharedSubmission);
     });
   }
@@ -2113,9 +1989,9 @@ export class ArdenRepository implements ArdenDataRepository {
       const uniqueSubmissionIds = [...new Set(submissionIds)];
       if (uniqueSubmissionIds.length === 0) return [];
       const result = await client.query<{ submission_id: string }>(`
-        SELECT s.submission_id FROM shared_submission s
-         WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
-           AND s.submission_id = ANY($3::uuid[])`, [organizationId, membership, uniqueSubmissionIds]);
+        SELECT s.id AS submission_id FROM review_submission s
+         WHERE s.organization_id = $1 AND s.submitted_by_id = $2
+           AND s.id = ANY($3::uuid[])`, [organizationId, membership, uniqueSubmissionIds]);
       return result.rows.map(row => row.submission_id);
     });
   }
@@ -2128,10 +2004,10 @@ export class ArdenRepository implements ArdenDataRepository {
       const ids = [...new Set(publishedVersionIds)];
       if (ids.length === 0) return [];
       const result = await client.query<{ published_version_id: string }>(`
-        SELECT pv.published_version_id
-          FROM knowledge_current_publication cp
-          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
-         WHERE cp.organization_id = $1 AND pv.published_version_id = ANY($2::uuid[])`,
+        SELECT pv.id AS published_version_id
+          FROM current_publication cp
+          JOIN published_version pv ON pv.id = cp.published_version_id
+         WHERE cp.organization_id = $1 AND pv.id = ANY($2::uuid[])`,
       [organizationId, ids]);
       return result.rows.map(row => row.published_version_id);
     });
@@ -2211,40 +2087,21 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  /** The insert policy re-checks that the actor can read the current publication. */
   async reportPublicationProblem(userId: string, organizationId: string, documentId: string, publishedVersionId: string,
     message: string): Promise<ReportPublicationResult> {
-    return this.withActorContext(userId, organizationId, async (client) => {
-      const membership = await this.activeActorMembership(client, userId, organizationId);
-      if (!membership) return { kind: "not-found" };
-      const reportId = randomUUID();
-      try {
-        await client.query("SAVEPOINT publication_report");
-        await client.query(`INSERT INTO publication_report (report_id, organization_id, shared_draft_id,
-            published_version_id, reporter_membership_id, message) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [reportId, organizationId, documentId, publishedVersionId, membership, message.trim()]);
-        return { kind: "reported", reportId };
-      } catch (error) {
-        const state = sqlStateOf(error);
-        if (state === "23505") { await client.query("ROLLBACK TO SAVEPOINT publication_report"); return { kind: "duplicate" }; }
-        if (state === "42501" || state === "23503") {
-          await client.query("ROLLBACK TO SAVEPOINT publication_report"); return { kind: "not-found" };
-        }
-        throw error;
-      }
-    });
+    try {
+      const report = await new MaintenanceCaseService(this.maintenance).acceptLegacyReport(userId, organizationId,
+        { documentId, publishedVersionId, message });
+      return { kind: "reported", reportId: report.caseId };
+    } catch (error) {
+      if (error instanceof MaintenanceError) return error.code === "CONFLICT" ? { kind: "duplicate" } : { kind: "not-found" };
+      throw error;
+    }
   }
 
   async listPublicationReports(userId: string, organizationId: string): Promise<PublicationReport[] | null> {
-    return this.withActorContext(userId, organizationId, async (client) => {
-      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
-      const result = await client.query<{ report_id: string; document_id: string; published_version_id: string;
-        title: string; message: string; reporter_name: string; created_at: Date; still_current: boolean; can_view: boolean }>(
-        "SELECT * FROM list_publication_reports()");
-      return result.rows.map((row) => ({ id: row.report_id, documentId: row.document_id,
-        publishedVersionId: row.published_version_id, title: row.title, message: row.message,
-        reporterName: row.reporter_name, createdAt: row.created_at, stillCurrent: row.still_current, canView: row.can_view }));
-    });
+    return this.withActorContext(userId, organizationId, async (client) =>
+      (await this.activeActorMembership(client, userId, organizationId)) ? [] : null);
   }
 
   async listClosedPublicationReports(userId: string, organizationId: string, cursor: string | null): Promise<{
@@ -2264,11 +2121,9 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async dismissPublicationReport(userId: string, organizationId: string, reportId: string): Promise<boolean> {
-    return this.withActorContext(userId, organizationId, async (client) => {
-      const result = await client.query<{ outcome: string }>("SELECT close_publication_report($1) AS outcome", [reportId]);
-      return result.rows[0]?.outcome === "CLOSED";
-    });
+  /** Legacy triage has moved to Maintenance. */
+  async dismissPublicationReport(): Promise<boolean> {
+    return false;
   }
 
   /**
@@ -2290,7 +2145,7 @@ export class ArdenRepository implements ArdenDataRepository {
         default: throw new Error("Publication retry returned no outcome");
       }
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.submission_id = $1`, [submissionId]);
+        WHERE s.id = $1`, [submissionId]);
       if (!result.rows[0]) throw new Error("Retried submission is not readable");
       return { kind: "preparing", submission: mapSharedSubmission(result.rows[0]) };
     });
@@ -2306,21 +2161,21 @@ export class ArdenRepository implements ArdenDataRepository {
       const membership = await this.activeActorMembership(client, userId, organizationId);
       if (!membership) return { kind: "not-found" };
       const selected = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.organization_id = $1 AND s.submission_id = $2 AND s.submitted_by_membership_id = $3`, [organizationId, submissionId, membership]);
+        WHERE s.organization_id = $1 AND s.id = $2 AND s.submitted_by_id = $3`, [organizationId, submissionId, membership]);
       const row = selected.rows[0];
       if (!row) return { kind: "not-found" };
       if (row.status === "WITHDRAWN") return { kind: "replayed", submission: mapSharedSubmission(row) };
       if (row.status !== "PENDING_REVIEW") return { kind: "conflict" };
       // No FOR UPDATE: RLS would hide a decided row from it. The guarded UPDATE is the atomic step.
-      const changed = await client.query(`UPDATE shared_submission SET status = 'WITHDRAWN'
-        WHERE submission_id = $1 AND status = 'PENDING_REVIEW'`, [submissionId]);
+      const changed = await client.query(`UPDATE review_submission SET status = 'WITHDRAWN'
+        WHERE id = $1 AND status = 'PENDING_REVIEW'`, [submissionId]);
       if (changed.rowCount !== 1) return { kind: "conflict" };
-      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
-        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_SUBMISSION_WITHDRAWN', 'SUCCESS', $3::jsonb)`,
+      await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type,
+        outcome, details) VALUES ($1, $2, 'KNOWLEDGE_SUBMISSION_WITHDRAWN', 'SUCCESS', $3::jsonb)`,
       [organizationId, membership, JSON.stringify({ submissionId, draftId: row.shared_draft_id,
         snapshotVersionId: row.shared_draft_version_id, requestId })]);
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.submission_id = $1`, [submissionId]);
+        WHERE s.id = $1`, [submissionId]);
       if (!result.rows[0]) throw new Error("Withdrawn submission is not readable");
       return { kind: "withdrawn", submission: mapSharedSubmission(result.rows[0]) };
     });
@@ -2345,23 +2200,23 @@ export class ArdenRepository implements ArdenDataRepository {
       const membership = await this.activeActorMembership(client, userId, organizationId);
       if (!membership) return { kind: "not-found" };
       const replay = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2 AND s.submit_request_id = $3`,
+        WHERE s.organization_id = $1 AND s.submitted_by_id = $2 AND s.submit_request_id = $3`,
       [organizationId, membership, input.idempotencyKey]);
       if (replay.rows[0]) {
         return replay.rows[0].shared_draft_id === documentId && replay.rows[0].request_type === input.type
           ? { kind: "replayed", submission: mapSharedSubmission(replay.rows[0]) } : { kind: "conflict" };
       }
-      const document = await client.query<{ author_membership_id: string }>(`SELECT author_membership_id FROM shared_draft
-        WHERE organization_id = $1 AND shared_draft_id = $2 AND status = 'ACTIVE' FOR UPDATE`, [organizationId, documentId]);
+      const document = await client.query<{ author_membership_id: string }>(`SELECT author_id AS author_membership_id FROM company_document
+        WHERE organization_id = $1 AND id = $2 AND status = 'ACTIVE' FOR UPDATE`, [organizationId, documentId]);
       if (document.rows[0]?.author_membership_id !== membership) return { kind: "not-found" };
       const current = await client.query<{ published_version_id: string; submission_id: string }>(`
-        SELECT cp.published_version_id, pv.submission_id FROM knowledge_current_publication cp
-          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
-         WHERE cp.organization_id = $1 AND cp.shared_draft_id = $2`, [organizationId, documentId]);
+        SELECT cp.published_version_id, pv.review_submission_id AS submission_id FROM current_publication cp
+          JOIN published_version pv ON pv.id = cp.published_version_id
+         WHERE cp.organization_id = $1 AND cp.document_id = $2`, [organizationId, documentId]);
       const publication = current.rows[0];
       if (!publication) return { kind: "not-published" };
-      const pending = await client.query(`SELECT 1 FROM shared_submission
-        WHERE shared_draft_id = $1 AND status = 'PENDING_REVIEW'`, [documentId]);
+      const pending = await client.query(`SELECT 1 FROM review_submission
+        WHERE document_id = $1 AND status = 'PENDING_REVIEW'`, [documentId]);
       if (pending.rowCount !== 0) return { kind: "conflict" };
       let selectionId: string | null = null;
       if (input.type === "READER_CHANGE") {
@@ -2372,25 +2227,25 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       // The request repeats the published submission's frozen snapshot, so it routes to the same reviewers.
       const inserted = await client.query<{ submission_id: string }>(`
-        INSERT INTO shared_submission (organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-          submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id, title,
-          classification, team_tag, project_tag, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
-          content_hash, submit_request_id, proposed_selection_id, request_type, request_reason,
+        INSERT INTO review_submission (organization_id, document_id, working_version_id, snapshot_version_no,
+          submitted_by_id, target_scope, target_department_id, owner_department_id, title,
+          classification, policy_version, review_rule, file_uri, mime_type,
+          content_hash, submit_request_id, proposed_reader_policy_id, request_type, request_reason,
           target_published_version_id)
-        SELECT s.organization_id, s.shared_draft_id, s.shared_draft_version_id, s.snapshot_version_no,
-               $2, s.target_scope_type, s.target_department_id, s.responsible_department_id, s.title,
-               s.classification, s.team_tag, s.project_tag, s.audience_role_ids, s.policy_version, s.review_rule,
-               s.content_uri, s.mime_type, s.content_hash, $3, $4::uuid, $5, $6, $7
-          FROM shared_submission s WHERE s.submission_id = $1
-        RETURNING submission_id`, [publication.submission_id, membership, input.idempotencyKey, selectionId,
+        SELECT s.organization_id, s.document_id, s.working_version_id, s.snapshot_version_no,
+               $2, s.target_scope, s.target_department_id, s.owner_department_id, s.title,
+               s.classification, s.policy_version, s.review_rule,
+               s.file_uri, s.mime_type, s.content_hash, $3, $4::uuid, $5, $6, $7
+          FROM review_submission s WHERE s.id = $1
+        RETURNING id AS submission_id`, [publication.submission_id, membership, input.idempotencyKey, selectionId,
         input.type, reason, publication.published_version_id]);
       const submissionId = inserted.rows[0]?.submission_id;
       if (!submissionId) throw new Error("Change request insert returned no identifier");
-      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
-        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_CHANGE_REQUESTED', 'SUCCESS', $3::jsonb)`,
+      await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type,
+        outcome, details) VALUES ($1, $2, 'KNOWLEDGE_CHANGE_REQUESTED', 'SUCCESS', $3::jsonb)`,
       [organizationId, membership, JSON.stringify({ submissionId, draftId: documentId, requestType: input.type,
         publishedVersionId: publication.published_version_id, requestId })]);
-      const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.submission_id = $1`, [submissionId]);
+      const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.id = $1`, [submissionId]);
       if (!result.rows[0]) throw new Error("Change request is not readable");
       return { kind: "requested", submission: mapSharedSubmission(result.rows[0]) };
     });
@@ -2398,8 +2253,8 @@ export class ArdenRepository implements ArdenDataRepository {
 
   async listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client) => {
-      const result = await client.query<ReviewerGrantRow>(`SELECT reviewer_grant_id, reviewer_membership_id,
-        scope, department_id, classifications, level, team_tag, project_tag, status, valid_from, valid_until
+      const result = await client.query<ReviewerGrantRow>(`SELECT id AS reviewer_grant_id, reviewer_id AS reviewer_membership_id,
+        scope, department_id, classifications, level, status, valid_from, valid_until
         FROM reviewer_grant WHERE organization_id = $1
         ORDER BY created_at DESC, reviewer_grant_id DESC LIMIT 200`, [organizationId]);
       return result.rows.map(mapReviewerGrant);
@@ -2408,13 +2263,14 @@ export class ArdenRepository implements ArdenDataRepository {
 
   async createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput,
     requestId: string): Promise<ReviewerGrantRecord | null> {
+    if (input.teamTag !== null || input.projectTag !== null) return null;
     return this.withOrganizationAdmin(userId, organizationId, async (client, adminMembershipId) => {
-      const target = await client.query(`SELECT 1 FROM organization_membership om
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        WHERE om.membership_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`,
+      const target = await client.query(`SELECT 1 FROM membership om
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        WHERE om.id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`,
       [input.reviewerMembershipId, organizationId]);
       const department = input.scope === "DEPARTMENT" && input.departmentId !== null
-        ? await client.query(`SELECT 1 FROM department WHERE department_id = $1
+        ? await client.query(`SELECT 1 FROM department WHERE id = $1
             AND organization_id = $2 AND status = 'ACTIVE'`, [input.departmentId, organizationId])
         : null;
       if (target.rowCount === 0
@@ -2426,33 +2282,31 @@ export class ArdenRepository implements ArdenDataRepository {
         [organizationId, input.reviewerMembershipId]);
       const level = input.level ?? "STANDARD";
       const duplicate = await client.query(`SELECT 1 FROM reviewer_grant
-        WHERE organization_id = $1 AND reviewer_membership_id = $2 AND scope = $3
+        WHERE organization_id = $1 AND reviewer_id = $2 AND scope = $3
           AND department_id IS NOT DISTINCT FROM $4::uuid
-          AND team_tag IS NOT DISTINCT FROM $5::text
-          AND project_tag IS NOT DISTINCT FROM $6::text
-          AND level = $7 AND classifications @> $8::text[] AND classifications <@ $8::text[]
+          AND level = $5 AND classifications @> $6::text[] AND classifications <@ $6::text[]
           AND status = 'ACTIVE' AND (valid_until IS NULL OR valid_until > now())
         LIMIT 1`, [organizationId, input.reviewerMembershipId, input.scope, input.departmentId,
-        input.teamTag, input.projectTag, level, input.classifications]);
+        level, input.classifications]);
       if (duplicate.rowCount) throw new ReviewerGrantConflictError();
       let result: QueryResult<ReviewerGrantRow>;
       try {
         result = await client.query<ReviewerGrantRow>(`
-        INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope, department_id,
-          granted_by_membership_id, classifications, level, team_tag, project_tag, valid_until)
-        VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10)
-        RETURNING reviewer_grant_id, reviewer_membership_id, scope, department_id, classifications,
-                  level, team_tag, project_tag, status, valid_from, valid_until`, [organizationId,
+        INSERT INTO reviewer_grant (organization_id, reviewer_id, scope, department_id,
+          granted_by_id, classifications, level, valid_until)
+        VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8)
+        RETURNING id AS reviewer_grant_id, reviewer_id AS reviewer_membership_id, scope, department_id, classifications,
+                  level, status, valid_from, valid_until`, [organizationId,
         input.reviewerMembershipId, input.scope, input.departmentId, adminMembershipId,
-        input.classifications, level, input.teamTag, input.projectTag, input.validUntil]);
+        input.classifications, level, input.validUntil]);
       } catch (error) {
         if (isUniqueViolation(error)) throw new ReviewerGrantConflictError();
         throw error;
       }
       const row = result.rows[0];
       if (!row) throw new Error("Reviewer grant insert returned no row");
-      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
-        event_type, outcome, details_json) VALUES ($1, $2, 'REVIEWER_GRANT_CREATED', 'SUCCESS', $3::jsonb)`, [
+      await client.query(`INSERT INTO audit_event (organization_id, actor_id,
+        event_type, outcome, details) VALUES ($1, $2, 'REVIEWER_GRANT_CREATED', 'SUCCESS', $3::jsonb)`, [
         organizationId, adminMembershipId,
         JSON.stringify({ reviewerGrantId: row.reviewer_grant_id, reviewerMembershipId: input.reviewerMembershipId,
           scope: input.scope, departmentId: input.departmentId, requestId }),
@@ -2465,11 +2319,11 @@ export class ArdenRepository implements ArdenDataRepository {
     requestId: string): Promise<boolean> {
     const result = await this.withOrganizationAdmin(userId, organizationId, async (client, adminMembershipId) => {
       const updated = await client.query<{ reviewer_membership_id: string }>(`UPDATE reviewer_grant SET status = 'INACTIVE'
-        WHERE reviewer_grant_id = $1 AND organization_id = $2 AND status = 'ACTIVE'
-        RETURNING reviewer_membership_id`, [grantId, organizationId]);
+        WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'
+        RETURNING reviewer_id AS reviewer_membership_id`, [grantId, organizationId]);
       if (updated.rowCount === 0) return false;
-      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
-        event_type, outcome, details_json) VALUES ($1, $2, 'REVIEWER_GRANT_DEACTIVATED', 'SUCCESS', $3::jsonb)`, [
+      await client.query(`INSERT INTO audit_event (organization_id, actor_id,
+        event_type, outcome, details) VALUES ($1, $2, 'REVIEWER_GRANT_DEACTIVATED', 'SUCCESS', $3::jsonb)`, [
         organizationId, adminMembershipId, JSON.stringify({ reviewerGrantId: grantId, requestId }),
       ]);
       return true;
@@ -2497,13 +2351,13 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!actor.isOrganizationAdmin && grants.length === 0) return [];
       if (submissionIds !== null && submissionIds.length === 0) return [];
       // Decision 0033: a reviewer's own submissions are listed like any other; the policy checks the grant.
-      const resourceFilter = submissionIds === null ? "" : "AND s.submission_id = ANY($2::uuid[])";
+      const resourceFilter = submissionIds === null ? "" : "AND s.id = ANY($2::uuid[])";
       const listLimit = submissionIds === null ? "LIMIT 100" : "";
       const values = submissionIds === null ? [organizationId] : [organizationId, submissionIds];
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
         WHERE s.organization_id = $1 AND s.status = 'PENDING_REVIEW'
           ${resourceFilter}
-        ORDER BY s.submitted_at DESC, s.submission_id DESC ${listLimit}`, values);
+        ORDER BY s.submitted_at DESC, s.id DESC ${listLimit}`, values);
       const now = new Date();
       const candidates = await Promise.all(result.rows.map(async (row) => ({
         submissionId: row.submission_id,
@@ -2514,8 +2368,7 @@ export class ArdenRepository implements ArdenDataRepository {
         submission: reviewAuthorizationFromRow(row, organizationId),
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
-          row.target_scope_type, row.responsible_department_id),
+        readersEnforceable: submissionReadersEnforceable(row),
         requestType: row.request_type,
       })));
       const assigned = listAssignedReviews({ actor, now, candidates });
@@ -2533,13 +2386,13 @@ export class ArdenRepository implements ArdenDataRepository {
       const result = await client.query<{ submission_id: string; title: string; responsible_department_id: string;
         classification: KnowledgeClassification; snapshot_version_no: number; decision: "APPROVED" | "REJECTED";
         decided_at: Date; submitted_at: Date; publication_state: SharedKnowledgeSubmission["publicationState"] }>(`
-        SELECT s.submission_id, s.title, s.responsible_department_id, s.classification, s.snapshot_version_no,
+        SELECT s.id AS submission_id, s.title, s.owner_department_id AS responsible_department_id, s.classification, s.snapshot_version_no,
                rd.decision, rd.decided_at, s.submitted_at, s.publication_state
           FROM review_decision rd
-          JOIN shared_submission s ON s.submission_id = rd.submission_id
-         WHERE rd.flow2 AND rd.reviewer_membership_id = $1 AND s.organization_id = $2
-           AND s.shared_draft_version_id IS NOT NULL
-         ORDER BY rd.decided_at DESC, s.submission_id DESC LIMIT 100`, [actor.membershipId, organizationId]);
+          JOIN review_submission s ON s.id = rd.review_submission_id
+         WHERE rd.is_snapshot_review AND rd.reviewer_id = $1 AND s.organization_id = $2
+           AND s.working_version_id IS NOT NULL
+         ORDER BY rd.decided_at DESC, s.id DESC LIMIT 100`, [actor.membershipId, organizationId]);
       const names = await this.reviewAuthorNames(client, result.rows.map((row) => row.submission_id));
       return result.rows.map((row) => ({
         submissionId: row.submission_id, title: row.title, departmentId: row.responsible_department_id,
@@ -2563,7 +2416,7 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!actor) return null;
       const { membershipId } = actor;
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.organization_id = $1 AND s.submission_id = $2 AND s.status = 'PENDING_REVIEW'`,
+        WHERE s.organization_id = $1 AND s.id = $2 AND s.status = 'PENDING_REVIEW'`,
       [organizationId, submissionId]);
       const row = result.rows[0];
       if (!row || (!actor.isOrganizationAdmin && row.submitted_by_membership_id === membershipId)) return null;
@@ -2578,7 +2431,7 @@ export class ArdenRepository implements ArdenDataRepository {
       return {
         submission: mapSharedSubmission(row), sourceUri: row.content_uri, mimeType: row.mime_type,
         submittedByMembershipId: row.submitted_by_membership_id,
-        teamTag: row.team_tag, projectTag: row.project_tag,
+        teamTag: null, projectTag: null,
         // Resolved only after the exact review authorization above.
         proposedReaders: await this.proposedReadersDetail(client, submissionId, mapReaderSelection(row)),
       };
@@ -2601,7 +2454,7 @@ export class ArdenRepository implements ArdenDataRepository {
           [submissionId, requestedDecision, expectedSnapshotVersionId, expectedContentHash, comment, idempotencyKey])).rows[0]?.outcome;
         if (authorOutcome === "DECIDED" || authorOutcome === "REPLAYED") {
           const decided = await client.query<SharedSubmissionRow>(`${submissionSelect}
-            WHERE s.organization_id = $1 AND s.submission_id = $2`, [organizationId, submissionId]);
+            WHERE s.organization_id = $1 AND s.id = $2`, [organizationId, submissionId]);
           if (!decided.rows[0]) throw new Error("Decided renewal is not readable");
           return { kind: authorOutcome === "DECIDED" ? "decided" : "replayed", submission: mapSharedSubmission(decided.rows[0]) };
         }
@@ -2610,10 +2463,10 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       const replay = await client.query<{ submission_id: string; decision: string; snapshot_version_id: string;
         content_hash: string; comment: string | null } & ApprovedReaderColumns>(`
-        SELECT submission_id, decision, snapshot_version_id, content_hash, comment,
-               ${readerSelectionColumns("approved_selection_id", "approved")}
+        SELECT review_submission_id AS submission_id, decision, working_version_id AS snapshot_version_id, content_hash, comment,
+               ${readerSelectionColumns("approved_reader_policy_id", "approved")}
           FROM review_decision
-         WHERE reviewer_membership_id = $1 AND decision_request_id = $2 AND flow2`, [membershipId, idempotencyKey]);
+         WHERE reviewer_id = $1 AND decision_request_id = $2 AND is_snapshot_review`, [membershipId, idempotencyKey]);
       if (replay.rows[0]) {
         const previous = replay.rows[0];
         if (previous.submission_id !== submissionId || previous.decision !== requestedDecision
@@ -2621,7 +2474,7 @@ export class ArdenRepository implements ArdenDataRepository {
           || previous.content_hash !== expectedContentHash
           || previous.comment !== (comment?.trim() || null)) return { kind: "conflict" };
         const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
-          WHERE s.organization_id = $1 AND s.submission_id = $2`, [organizationId, submissionId]);
+          WHERE s.organization_id = $1 AND s.id = $2`, [organizationId, submissionId]);
         const replayed = result.rows[0];
         if (!replayed) return { kind: "not-found" };
         // Same key, same readers (compared as a set; absent means "as proposed"), or it is a different request.
@@ -2637,7 +2490,7 @@ export class ArdenRepository implements ArdenDataRepository {
         return { kind: "replayed", submission: mapSharedSubmission(replayed) };
       }
       const selected = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.organization_id = $1 AND s.submission_id = $2 FOR UPDATE OF s`, [organizationId, submissionId]);
+        WHERE s.organization_id = $1 AND s.id = $2 FOR UPDATE OF s`, [organizationId, submissionId]);
       const row = selected.rows[0];
       if (!row) return { kind: "not-found" };
       if (row.status !== "PENDING_REVIEW") return { kind: "conflict" };
@@ -2660,8 +2513,7 @@ export class ArdenRepository implements ArdenDataRepository {
           submissionId, snapshotVersionId: row.shared_draft_version_id, contentHash: row.content_hash },
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
-          row.target_scope_type, row.responsible_department_id),
+        readersEnforceable: submissionReadersEnforceable(row),
         policy: { kind: "SINGLE_REVIEWER" },
         now: new Date(),
         readers: { proposed: proposedReaders, facts: readerFacts },
@@ -2680,9 +2532,9 @@ export class ArdenRepository implements ArdenDataRepository {
       const decisionId = randomUUID();
       try {
         await client.query("SAVEPOINT review_decision_insert");
-        await client.query(`INSERT INTO review_decision (review_decision_id, submission_id,
-          reviewer_membership_id, decision, comment, flow2, decision_request_id,
-          snapshot_version_id, content_hash, approved_selection_id)
+        await client.query(`INSERT INTO review_decision (id, review_submission_id,
+          reviewer_id, decision, comment, is_snapshot_review, decision_request_id,
+          working_version_id, content_hash, approved_reader_policy_id)
           VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)`, [decisionId, submissionId,
           membershipId, plan.decision, plan.comment, idempotencyKey,
           row.shared_draft_version_id, row.content_hash, approvedSelectionId]);
@@ -2694,8 +2546,8 @@ export class ArdenRepository implements ArdenDataRepository {
         }
         throw error;
       }
-      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
-        review_decision_id, event_type, outcome, details_json)
+      await client.query(`INSERT INTO audit_event (organization_id, actor_id,
+        review_decision_id, event_type, outcome, details)
         VALUES ($1, $2, $3, 'KNOWLEDGE_REVIEW_DECIDED', 'SUCCESS', $4::jsonb)`, [organizationId,
         membershipId, decisionId, JSON.stringify({ submissionId, snapshotVersionId: row.shared_draft_version_id,
           decision: plan.decision,
@@ -2707,7 +2559,7 @@ export class ArdenRepository implements ArdenDataRepository {
             approvedReaders: readersAuditSummary(readers.approved), narrowed: readers.narrowed } : {}),
           requestId })]);
       const completed = await client.query<SharedSubmissionRow>(`${submissionSelect}
-        WHERE s.organization_id = $1 AND s.submission_id = $2`, [organizationId, submissionId]);
+        WHERE s.organization_id = $1 AND s.id = $2`, [organizationId, submissionId]);
       if (!completed.rows[0]) throw new Error("Reviewed submission is not readable");
       return { kind: "decided", submission: mapSharedSubmission(completed.rows[0]) };
     });
@@ -2789,7 +2641,7 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       const outcome = row?.outcome;
       if ((outcome === "REQUESTED" || outcome === "REPLAYED") && row?.submission_id) {
-        const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.submission_id = $1`,
+        const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.id = $1`,
           [row.submission_id]);
         if (!result.rows[0]) throw new Error("Renewal request is not readable");
         return { kind: outcome === "REQUESTED" ? "requested" : "replayed", submission: mapSharedSubmission(result.rows[0]) };
@@ -2826,7 +2678,7 @@ export class ArdenRepository implements ArdenDataRepository {
     publishedVersionId: string): Promise<PublishedKnowledge | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
-        WHERE cp.organization_id = $1 AND pv.published_version_id = $2`, [organizationId, publishedVersionId]);
+        WHERE cp.organization_id = $1 AND pv.id = $2`, [organizationId, publishedVersionId]);
       if (result.rows[0]) return mapPublishedKnowledge(result.rows[0]);
       return null;
     });
@@ -2838,21 +2690,21 @@ export class ArdenRepository implements ArdenDataRepository {
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
       const result = await client.query<AuthorizedAiSourceRow>(`
-        SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
-               pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, kb.scope_type AS target_scope_type, pv.responsible_department_id, pv.management,
-               ${readerSelectionColumns("pv.reader_selection_id")},
+        SELECT g.id AS generation_id, g.snapshot_version_id, g.snapshot_content_hash,
+               pv.id AS published_version_id, pv.document_id AS shared_draft_id, pv.title, pv.version_no,
+               pv.classification, kb.scope AS target_scope_type, pv.owner_department_id AS responsible_department_id, pv.metadata AS management,
+               ${readerSelectionColumns("pv.reader_policy_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
-                 (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
+                 (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest->'chunks') chunk
                    WHERE $3::text[] IS NULL OR chunk->>'chunkId' = ANY($3::text[])) END AS chunks
-          FROM published_knowledge_version pv
-          JOIN knowledge_base kb ON kb.knowledge_base_id = pv.knowledge_base_id
-          JOIN knowledge_index_generation g
-            ON g.submission_id = pv.submission_id AND g.status = 'READY'
-         WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications())
-           AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
-           AND ($4::uuid[] IS NULL OR pv.shared_draft_id = ANY($4::uuid[]))
-         ORDER BY pv.published_at DESC, pv.published_version_id DESC
+          FROM published_version pv
+          JOIN knowledge_base kb ON kb.id = pv.knowledge_base_id
+          JOIN index_generation g
+            ON g.review_submission_id = pv.review_submission_id AND g.status = 'READY'
+         WHERE g.organization_id = $1 AND pv.id IN (SELECT eligible_ai_publications())
+           AND ($2::uuid[] IS NULL OR g.id = ANY($2::uuid[]))
+           AND ($4::uuid[] IS NULL OR pv.document_id = ANY($4::uuid[]))
+         ORDER BY pv.published_at DESC, pv.id DESC
          LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, scopeDocumentIds ?? null]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
@@ -2882,16 +2734,16 @@ export class ArdenRepository implements ArdenDataRepository {
     if (uniqueIds.length > 500) return false;
     return this.withActorContext(userId, organizationId, async (client) => {
       const actorResult = await client.query<{ membership_id: string; status: ReaderActor["status"]; department_ids: string[] }>(`
-        SELECT om.membership_id, om.status,
+        SELECT om.id AS membership_id, om.status,
                ARRAY(SELECT dm.department_id::text FROM department_membership dm
-                       JOIN department d ON d.department_id = dm.department_id
+                       JOIN department d ON d.id = dm.department_id
                                         AND d.organization_id = om.organization_id AND d.status = 'ACTIVE'
-                      WHERE dm.membership_id = om.membership_id AND dm.status = 'ACTIVE'
+                      WHERE dm.membership_id = om.id AND dm.status = 'ACTIVE'
                       ORDER BY dm.department_id) AS department_ids
-          FROM organization_membership om
-          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-         WHERE om.user_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
+          FROM membership om
+          JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.account_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
       const actorRow = actorResult.rows[0];
       if (!actorRow || actorRow.status !== "ACTIVE") return false;
       if (uniqueIds.length === 0) return true;
@@ -2902,11 +2754,11 @@ export class ArdenRepository implements ArdenDataRepository {
         departmentIds: actorRow.department_ids,
       };
       const result = await client.query<{ published_version_id: string } & ReaderSelectionColumns>(`
-        SELECT pv.published_version_id,
-               ${readerSelectionColumns("pv.reader_selection_id")}
-          FROM published_knowledge_version pv
-         WHERE pv.published_version_id = ANY($1::uuid[])
-           AND pv.published_version_id IN (SELECT eligible_ai_publications())`, [uniqueIds]);
+        SELECT pv.id AS published_version_id,
+               ${readerSelectionColumns("pv.reader_policy_id")}
+          FROM published_version pv
+         WHERE pv.id = ANY($1::uuid[])
+           AND pv.id IN (SELECT eligible_ai_publications())`, [uniqueIds]);
       const allowed = new Set(
         result.rows
           .filter((row) => canRead(actor, { organizationId, readers: mapReaderSelection(row) }))
@@ -2919,16 +2771,16 @@ export class ArdenRepository implements ArdenDataRepository {
   async getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const result = await client.query<{ membership_id: string; status: ReaderActor["status"]; department_ids: string[] }>(`
-        SELECT om.membership_id, om.status,
+        SELECT om.id AS membership_id, om.status,
                ARRAY(SELECT dm.department_id::text FROM department_membership dm
-                       JOIN department d ON d.department_id = dm.department_id
+                       JOIN department d ON d.id = dm.department_id
                                         AND d.organization_id = om.organization_id AND d.status = 'ACTIVE'
-                      WHERE dm.membership_id = om.membership_id AND dm.status = 'ACTIVE'
+                      WHERE dm.membership_id = om.id AND dm.status = 'ACTIVE'
                       ORDER BY dm.department_id) AS department_ids
-          FROM organization_membership om
-          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-         WHERE om.user_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
+          FROM membership om
+          JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.account_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
       const row = result.rows[0];
       return row ? { membershipId: row.membership_id, organizationId, status: row.status,
         departmentIds: row.department_ids } : null;
@@ -2939,7 +2791,7 @@ export class ArdenRepository implements ArdenDataRepository {
     proposed: ReaderSelection | null): Promise<ProposedReadersDetail | null> {
     if (!proposed) return null;
     const department = proposed.departmentId === null ? null : (await client.query<{ department_id: string; name: string }>(`
-      SELECT department_id, name FROM department WHERE department_id = $1`, [proposed.departmentId])).rows[0] ?? null;
+      SELECT id AS department_id, name FROM department WHERE id = $1`, [proposed.departmentId])).rows[0] ?? null;
     const names = proposed.memberIds.length === 0 ? new Map<string, string>() : new Map((await client.query<{
       membership_id: string; display_name: string }>(`
       SELECT membership_id, display_name FROM submission_proposed_reader_directory($1)`, [submissionId]))
@@ -2958,8 +2810,8 @@ export class ArdenRepository implements ArdenDataRepository {
     const memberIds = input.memberIds ?? [];
     const departments = departmentId === null ? [] : (await client.query<{
       department_id: string; organization_id: string; status: "ACTIVE" | "INACTIVE" | "ARCHIVED" }>(`
-      SELECT department_id, organization_id, status FROM department
-       WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId])).rows;
+      SELECT id AS department_id, organization_id, status FROM department
+       WHERE id = $1 AND organization_id = $2`, [departmentId, organizationId])).rows;
     const members = memberIds.length === 0 || memberIds.length > maxSelectedReaders ? [] : (await client.query<{
       membership_id: string; membership_status: SelectionFacts["members"][number]["status"]; account_active: boolean;
       department_ids: string[] }>(`
@@ -2977,14 +2829,14 @@ export class ArdenRepository implements ArdenDataRepository {
   private async insertReaderSelection(client: PoolClient, organizationId: string, selection: ReaderSelection,
     revision: number): Promise<string> {
     const inserted = await client.query<{ selection_id: string }>(`
-      INSERT INTO reader_selection (organization_id, reader_mode, department_id, revision)
-      VALUES ($1, $2, $3, $4) RETURNING selection_id`,
+      INSERT INTO reader_policy (organization_id, mode, department_id, revision)
+      VALUES ($1, $2, $3, $4) RETURNING id AS selection_id`,
     [organizationId, selection.mode, selection.departmentId, revision]);
     const selectionId = inserted.rows[0]?.selection_id;
     if (!selectionId) throw new Error("Reader selection insert returned no identifier");
     if (selection.memberIds.length > 0) {
       await client.query(`
-        INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+        INSERT INTO policy_reader (reader_policy_id, organization_id, membership_id, position)
         SELECT $1, $2, member.membership_id, member.ordinal
           FROM unnest($3::uuid[]) WITH ORDINALITY AS member(membership_id, ordinal)`,
       [selectionId, organizationId, selection.memberIds]);
@@ -3007,7 +2859,7 @@ export class ArdenRepository implements ArdenDataRepository {
         VALUES ($1, 'Private workspace')
         ON CONFLICT (membership_id) DO NOTHING`, [membershipId]);
       const workspace = await client.query<{ workspace_id: string }>(`
-        SELECT workspace_id FROM private_workspace
+        SELECT id AS workspace_id FROM private_workspace
          WHERE membership_id = $1 AND status = 'ACTIVE'`, [membershipId]);
       const workspaceId = workspace.rows[0]?.workspace_id;
       if (!workspaceId) return null;
@@ -3019,16 +2871,16 @@ export class ArdenRepository implements ArdenDataRepository {
       }
 
       const draft = await client.query<{ draft_id: string; created_at: Date; updated_at: Date }>(`
-        INSERT INTO draft_document (workspace_id, title, current_version_no, collection_id)
+        INSERT INTO private_document (workspace_id, title, current_version_no, folder_id)
         VALUES ($1, $2, 1, $3)
-        RETURNING draft_id, created_at, updated_at`, [workspaceId, write.title, collectionId]);
+        RETURNING id AS draft_id, created_at, updated_at`, [workspaceId, write.title, collectionId]);
       const created = draft.rows[0];
       if (!created) throw new Error("Draft insert returned no row");
       const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id,
-                                   text_source_uri, text_content_hash)
+        INSERT INTO private_version (document_id, version_no, file_uri, mime_type, content_hash, size_bytes, created_by_id,
+                                   text_uri, text_content_hash)
         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash,
+        RETURNING id AS draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash,
         content.contentSizeBytes ?? null, membershipId,
         content.text?.sourceUri ?? null, content.text?.contentHash ?? null]);
       const versionId = versionResult.rows[0]?.draft_version_id;
@@ -3055,10 +2907,10 @@ export class ArdenRepository implements ArdenDataRepository {
   async canUpdateDraft(userId: string, organizationId: string, draftId: string): Promise<boolean> {
     return this.withActorContext(userId, organizationId, async (client) => {
     const result = await client.query(`
-      SELECT 1 FROM draft_document d
-      JOIN private_workspace w ON w.workspace_id = d.workspace_id
-      JOIN organization_membership om ON om.membership_id = w.membership_id
-     WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
+      SELECT 1 FROM private_document d
+      JOIN private_workspace w ON w.id = d.workspace_id
+      JOIN membership om ON om.id = w.membership_id
+     WHERE d.id = $1 AND om.organization_id = $2 AND om.account_id = $3
        AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
        AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
     return result.rowCount === 1;
@@ -3070,10 +2922,10 @@ export class ArdenRepository implements ArdenDataRepository {
       // Lock the mutable document before reading its version join. Under READ
       // COMMITTED, a waiter otherwise rechecks the new document against an old
       // joined-version snapshot and can incorrectly report an owned draft missing.
-      const locked = await client.query(`SELECT d.draft_id FROM draft_document d
-        JOIN private_workspace w ON w.workspace_id = d.workspace_id
-        JOIN organization_membership om ON om.membership_id = w.membership_id
-        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
+      const locked = await client.query(`SELECT d.id AS draft_id FROM private_document d
+        JOIN private_workspace w ON w.id = d.workspace_id
+        JOIN membership om ON om.id = w.membership_id
+        WHERE d.id = $1 AND om.organization_id = $2 AND om.account_id = $3
           AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
           AND ${membershipPermissionSql("$4")}
         FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
@@ -3096,17 +2948,17 @@ export class ArdenRepository implements ArdenDataRepository {
         text_content_hash: string | null;
         sealed: boolean;
       }>(`
-        SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes,
-               d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
-               v.text_source_uri, v.text_content_hash,
+        SELECT om.id AS membership_id, d.title, v.id AS draft_version_id, v.file_uri AS source_uri, v.mime_type, v.content_hash, v.size_bytes AS content_size_bytes,
+               d.current_version_no, d.created_at, d.updated_at, d.folder_id AS collection_id, d.favorited_at, d.position AS sort_position,
+               v.text_uri AS text_source_uri, v.text_content_hash,
                (v.sealed_at IS NOT NULL
-                OR EXISTS (SELECT 1 FROM shared_draft s WHERE s.source_private_version_id = v.draft_version_id)
-                OR EXISTS (SELECT 1 FROM shared_submission s WHERE s.draft_version_id = v.draft_version_id)) AS sealed
-          FROM draft_document d
-          JOIN private_workspace w ON w.workspace_id = d.workspace_id
-          JOIN organization_membership om ON om.membership_id = w.membership_id
-          JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
-         WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
+                OR EXISTS (SELECT 1 FROM company_document s WHERE s.source_private_version_id = v.id)
+                OR EXISTS (SELECT 1 FROM review_submission s WHERE s.private_version_id = v.id)) AS sealed
+          FROM private_document d
+          JOIN private_workspace w ON w.id = d.workspace_id
+          JOIN membership om ON om.id = w.membership_id
+          JOIN private_version v ON v.document_id = d.id AND v.version_no = d.current_version_no
+         WHERE d.id = $1 AND om.organization_id = $2 AND om.account_id = $3
            AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
            AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
       const current = currentResult.rows[0];
@@ -3125,32 +2977,32 @@ export class ArdenRepository implements ArdenDataRepository {
         text: storedText(current.text_source_uri, current.text_content_hash),
       };
       await client.query(`
-        UPDATE draft_document
+        UPDATE private_document
            SET title = $2, current_version_no = $3, updated_at = now()
-         WHERE draft_id = $1`, [draftId, title, version]);
+         WHERE id = $1`, [draftId, title, version]);
       let versionId: string;
       const replacedSourceUris: string[] = [];
       if (!current.sealed) {
         // Decision 0031: the open current version is overwritten instead of adding history.
         await client.query(`
-          UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5,
-                 content_size_bytes = $6, text_source_uri = $7, text_content_hash = $8
-           WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash,
+          UPDATE private_version SET version_no = $2, file_uri = $3, mime_type = $4, content_hash = $5,
+                 size_bytes = $6, text_uri = $7, text_content_hash = $8
+           WHERE id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash,
           source.contentSizeBytes ?? null, source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
         versionId = current.draft_version_id;
         // Objects the overwrite made unreachable are erased by the caller after commit.
         for (const replaced of [current.source_uri, current.text_source_uri]) {
           if (!replaced || replaced === source.sourceUri || replaced === source.text?.sourceUri) continue;
-          const shared = await client.query(`SELECT 1 FROM draft_version WHERE source_uri = $1 OR text_source_uri = $1 LIMIT 1`, [replaced]);
+          const shared = await client.query(`SELECT 1 FROM private_version WHERE file_uri = $1 OR text_uri = $1 LIMIT 1`, [replaced]);
           if (!shared.rowCount) replacedSourceUris.push(replaced);
         }
       } else {
         // A contributed (sealed) version stays as it is; the note continues in a new open version.
         const versionResult = await client.query<{ draft_version_id: string }>(`
-          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id,
-                                     text_source_uri, text_content_hash)
+          INSERT INTO private_version (document_id, version_no, file_uri, mime_type, content_hash, size_bytes, created_by_id,
+                                     text_uri, text_content_hash)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash,
+          RETURNING id AS draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash,
           source.contentSizeBytes ?? null, current.membership_id,
           source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
         const inserted = versionResult.rows[0]?.draft_version_id;
@@ -3158,7 +3010,7 @@ export class ArdenRepository implements ArdenDataRepository {
         versionId = inserted;
       }
       const updated = await client.query<{ created_at: Date; updated_at: Date }>(`
-        SELECT created_at, updated_at FROM draft_document WHERE draft_id = $1`, [draftId]);
+        SELECT created_at, updated_at FROM private_document WHERE id = $1`, [draftId]);
       const timestamps = updated.rows[0];
       if (!timestamps) throw new Error("Updated draft disappeared within transaction");
       return {
@@ -3189,14 +3041,14 @@ export class ArdenRepository implements ArdenDataRepository {
       draft_version_id: string; membership_id: string; title: string;
       source_uri: string; mime_type: string; content_hash: string; content_size_bytes: number | null;
     }>(`
-      SELECT v.draft_version_id, om.membership_id, d.title, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes
-        FROM draft_version v
-        JOIN draft_document d ON d.draft_id = v.draft_id
-        JOIN private_workspace w ON w.workspace_id = d.workspace_id
-        JOIN organization_membership om ON om.membership_id = w.membership_id
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-       WHERE v.draft_version_id = $1 AND om.user_id = $2 AND om.organization_id = $3
+      SELECT v.id AS draft_version_id, om.id AS membership_id, d.title, v.file_uri AS source_uri, v.mime_type, v.content_hash, v.size_bytes AS content_size_bytes
+        FROM private_version v
+        JOIN private_document d ON d.id = v.document_id
+        JOIN private_workspace w ON w.id = d.workspace_id
+        JOIN membership om ON om.id = w.membership_id
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+       WHERE v.id = $1 AND om.account_id = $2 AND om.organization_id = $3
          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
          AND ${membershipPermissionSql("$4")}`, [sourceVersionId, userId, organizationId, "PRIVATE_WORKSPACE_READ"]);
     const row = result.rows[0];
@@ -3214,7 +3066,7 @@ export class ArdenRepository implements ArdenDataRepository {
 
   private async findSharedDraftByCreateRequest(client: PoolClient, membershipId: string, organizationId: string, requestKey: string): Promise<{ draft: SharedKnowledgeDraft; createRequestHash: string } | null> {
     const result = await client.query<SharedDraftRow>(`${sharedDraftSelect}
-       WHERE d.organization_id = $1 AND d.author_membership_id = $2 AND d.create_request_id = $3`,
+       WHERE d.organization_id = $1 AND d.author_id = $2 AND d.create_request_id = $3`,
     [organizationId, membershipId, requestKey]);
     const row = result.rows[0];
     return row ? {
@@ -3225,10 +3077,10 @@ export class ArdenRepository implements ArdenDataRepository {
 
   private async findMembership(userId: string, organizationId: string, permissionCode: string, client: Pool | PoolClient = this.pool): Promise<string | null> {
     const result = await client.query<{ membership_id: string }>(`
-      SELECT om.membership_id
-        FROM organization_membership om
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+      SELECT om.id AS membership_id
+        FROM membership om
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+       WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
          AND ${membershipPermissionSql("$3")}`, [userId, organizationId, permissionCode]);
     return result.rows[0]?.membership_id ?? null;
   }
@@ -3236,11 +3088,11 @@ export class ArdenRepository implements ArdenDataRepository {
   private async activeActorMembership(client: PoolClient, userId: string, organizationId: string,
     expectedMembershipId?: string): Promise<string | null> {
     const result = await client.query<{ membership_id: string }>(`
-      SELECT om.membership_id FROM organization_membership om
-      JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-      JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-      WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
-        AND ($3::uuid IS NULL OR om.membership_id = $3::uuid)`,
+      SELECT om.id AS membership_id FROM membership om
+      JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+      JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+      WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+        AND ($3::uuid IS NULL OR om.id = $3::uuid)`,
     [userId, organizationId, expectedMembershipId ?? null]);
     return result.rows[0]?.membership_id ?? null;
   }
@@ -3249,10 +3101,10 @@ export class ArdenRepository implements ArdenDataRepository {
     const membershipId = await this.activeActorMembership(client, userId, organizationId);
     if (!membershipId) return null;
     const admin = await client.query(`SELECT 1 FROM role_assignment ra
-      JOIN role r ON r.role_id = ra.role_id AND r.code = 'ORG_ADMIN'
+      JOIN role r ON r.id = ra.role_id AND r.code = 'ORG_ADMIN'
         AND r.is_system AND r.status = 'ACTIVE'
-      JOIN access_scope s ON s.access_scope_id = ra.access_scope_id
-        AND s.organization_id = $2 AND s.scope_type = 'ORGANIZATION' AND s.status = 'ACTIVE'
+      JOIN access_scope s ON s.id = ra.access_scope_id
+        AND s.organization_id = $2 AND s.scope = 'ORGANIZATION' AND s.status = 'ACTIVE'
       WHERE ra.membership_id = $1 AND ra.status = 'ACTIVE' AND ra.valid_from <= now()
         AND (ra.valid_until IS NULL OR ra.valid_until > now())`, [membershipId, organizationId]);
     const isOrganizationAdmin = admin.rowCount !== 0;
@@ -3262,9 +3114,9 @@ export class ArdenRepository implements ArdenDataRepository {
 
   private async loadActorReviewerGrants(client: PoolClient, membershipId: string, organizationId: string) {
     const result = await client.query<ReviewerGrantRow>(`
-      SELECT reviewer_grant_id, reviewer_membership_id, department_id, classifications,
-             scope, level, team_tag, project_tag, status, valid_from, valid_until
-        FROM reviewer_grant WHERE organization_id = $1 AND reviewer_membership_id = $2`,
+      SELECT id AS reviewer_grant_id, reviewer_id AS reviewer_membership_id, department_id, classifications,
+             scope, level, status, valid_from, valid_until
+        FROM reviewer_grant WHERE organization_id = $1 AND reviewer_id = $2`,
     [organizationId, membershipId]);
     return result.rows.map((row) => ({
       membershipId: row.reviewer_membership_id,
@@ -3274,8 +3126,8 @@ export class ArdenRepository implements ArdenDataRepository {
       status: row.status,
       classifications: row.classifications,
       level: row.level,
-      teamTag: row.team_tag,
-      projectTag: row.project_tag,
+      teamTag: null,
+      projectTag: null,
       validFrom: row.valid_from,
       validUntil: row.valid_until,
     }));
@@ -3285,24 +3137,18 @@ export class ArdenRepository implements ArdenDataRepository {
   private async actorPrimaryDepartment(client: PoolClient, userId: string, organizationId: string): Promise<string | null> {
     const result = await client.query<{ department_id: string }>(`
       SELECT dm.department_id FROM department_membership dm
-        JOIN organization_membership om ON om.membership_id = dm.membership_id
-        JOIN department d ON d.department_id = dm.department_id AND d.organization_id = om.organization_id
-       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+        JOIN membership om ON om.id = dm.membership_id
+        JOIN department d ON d.id = dm.department_id AND d.organization_id = om.organization_id
+       WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
          AND dm.is_primary AND dm.status = 'ACTIVE' AND d.status = 'ACTIVE'
        LIMIT 1`, [userId, organizationId]);
     return result.rows[0]?.department_id ?? null;
   }
 
-  private async audienceEnforceable(client: PoolClient, organizationId: string, audienceIds: string[],
-    targetScopeType: "ORGANIZATION" | "DEPARTMENT", departmentId: string | null): Promise<boolean> {
-    const result = await client.query<{ enforceable: boolean }>(`SELECT audience_snapshot_enforceable(
-      $1, $2::uuid[], $3, $4) AS enforceable`, [organizationId, audienceIds, targetScopeType, departmentId]);
-    return result.rows[0]?.enforceable === true;
-  }
 
   private async appendAudit(client: PoolClient, organizationId: string, membershipId: string, eventType: string, draftId: string, version: number, requestId: string) {
     await client.query(`
-      INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+      INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
       VALUES ($1, $2, $3, 'SUCCESS', $4::jsonb)`, [organizationId, membershipId, eventType, JSON.stringify({ draftId, version, requestId })]);
   }
 

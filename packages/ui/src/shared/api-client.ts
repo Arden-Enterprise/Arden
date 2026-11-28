@@ -21,12 +21,15 @@ export type NotificationTarget = { view: "review-queue"; id: string } | { view: 
   /** Decision 0032: My Contributions with this document selected (e.g. to decide an on-behalf renewal). */
   | { view: "contribution"; documentId: string }
   /** Decision 0034: a private item shared directly with this member. */
-  | { view: "shared-item"; itemId: string };
+  | { view: "shared-item"; itemId: string }
+  | { view: "reported-case"; caseId: string }
+  | { view: "maintenance-case"; caseId: string };
 export type NotificationItem = {
   id: string;
   type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
     | "PUBLICATION_FAILED" | "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
-    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED" | "DOCUMENT_SHARED_DIRECT";
+    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED" | "DOCUMENT_SHARED_DIRECT"
+    | "MAINTENANCE_CASE_UPDATED";
   message: string;
   createdAt: string;
   readAt: string | null;
@@ -780,7 +783,7 @@ export async function listReviewerGrants(platform: Platform, organizationId: str
 }
 
 export function createReviewerGrant(platform: Platform, organizationId: string,
-  input: Pick<ReviewerGrant, "reviewerMembershipId" | "scope" | "departmentId" | "teamTag" | "projectTag" | "validUntil">): Promise<ReviewerGrant> {
+  input: Pick<ReviewerGrant, "reviewerMembershipId" | "scope" | "departmentId" | "validUntil">): Promise<ReviewerGrant> {
   return request(platform, `${knowledgePath(organizationId)}/reviewer-grants`, { method: "POST", body: JSON.stringify(input) });
 }
 

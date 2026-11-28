@@ -14,10 +14,9 @@ export function validatePdfFile(file: Pick<File, "name" | "type" | "size"> | nul
   return "";
 }
 
-export function draftStatus(item: Pick<KnowledgeDraftSummary, "hasPendingSubmission" | "responsibleDepartmentId" | "targetScopeType" | "audienceIds" | "versionId">, latest?: KnowledgeSubmission): { label: string; tone: string } {
+export function draftStatus(item: Pick<KnowledgeDraftSummary, "hasPendingSubmission" | "responsibleDepartmentId" | "targetReaders" | "versionId">, latest?: KnowledgeSubmission): { label: string; tone: string } {
   if (item.hasPendingSubmission) return { label: "Awaiting review", tone: "is-info" };
-  const hasAudiences = Array.isArray(item.audienceIds) && item.audienceIds.length > 0;
-  if (!latest) return { label: item.responsibleDepartmentId && item.targetScopeType && hasAudiences ? "Draft" : "Draft · Details needed", tone: "" };
+  if (!latest) return { label: item.responsibleDepartmentId && item.targetReaders ? "Draft" : "Draft · Details needed", tone: "" };
   if (latest.status === "APPROVED" && latest.publicationState === "WITHDRAWN") return { label: "Withdrawn", tone: "" };
   if (latest.status === "APPROVED" && latest.requestType && latest.requestType !== "CONTENT") {
     return { label: reviewRequestPresentation(latest.requestType).success, tone: "is-info" };

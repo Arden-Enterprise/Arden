@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
-REVIEWED_BASELINE_DEFINER_COUNT = 50
+REVIEWED_BASELINE_DEFINER_COUNT = 42
 # Isolated System Admin executors (0072/0074). They stay superuser-owned and outside the transfer.
 REVIEWED_SYSTEM_DEFINERS = {
     "console_report(uuid, text, uuid, timestamp with time zone, timestamp with time zone, text, text, integer, integer)",
@@ -27,13 +27,14 @@ REVIEWED_GRAPH_DEFINERS = {
 }
 REVIEWED_MAINTENANCE_DEFINERS = {
     "enqueue_maintenance_submission_notices()",
+    "enqueue_maintenance_case_notice(uuid, uuid, uuid, text, text)",
     "list_closed_publication_reports()",
     "list_closed_publication_reports(uuid)",
     "list_maintenance_document_versions(uuid, uuid)",
     "list_maintenance_eligible_reviewers(uuid)",
-    "list_unmapped_open_publication_reports(timestamp with time zone, uuid)",
+
     "maintenance_actor_can_review_version(uuid)",
-    "maintenance_has_unmapped_open_reader_report(uuid)",
+
     "maintenance_lock_document(uuid)",
     "maintenance_membership_can_review_version(uuid, uuid)",
     "maintenance_next_event_sequence(uuid)",
@@ -55,7 +56,7 @@ def verify_full_schema(container):
             raise RuntimeError("Full-schema ownership rehearsal failed")
         return result.stdout.strip()
 
-    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "77":
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "81":
         raise ValueError("Review the full-schema ownership fixture when migrations change")
     sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
         "NOCREATEDB NOCREATEROLE NOREPLICATION")
@@ -69,7 +70,9 @@ def verify_full_schema(container):
                         "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                         "WHERE n.nspname='arden' AND p.prosecdef AND "
                         "p.proowner='postgres'::regrole").splitlines())
-    reviewed = REVIEWED_MAINTENANCE_DEFINERS | REVIEWED_GRAPH_DEFINERS
+    reviewed = REVIEWED_MAINTENANCE_DEFINERS | REVIEWED_GRAPH_DEFINERS | {
+        "update_organization_direct_share_settings(uuid, boolean, integer, text)",
+    }
     if (len(preserved) != REVIEWED_BASELINE_DEFINER_COUNT + len(REVIEWED_MAINTENANCE_DEFINERS)
             or not reviewed.issubset(preserved)
             or "notify_arden_publication_share()" not in preserved):

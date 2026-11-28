@@ -44,16 +44,11 @@ export class PgDirectShareStore implements DirectShareStore {
   }
 
   async updateSettings(userId: string, organizationId: string, input: DirectShareSettings, requestId: string): Promise<DirectShareSettings | null> {
-    return this.withAdmin(userId, organizationId, async (client, membershipId) => {
-      await client.query(`INSERT INTO organization_direct_share_setting
-          (organization_id, enabled, recipient_limit, updated_by_membership_id)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (organization_id) DO UPDATE SET enabled = EXCLUDED.enabled, recipient_limit = EXCLUDED.recipient_limit,
-          updated_by_membership_id = EXCLUDED.updated_by_membership_id, updated_at = now()`,
-      [organizationId, input.enabled, input.recipientLimit, membershipId]);
-      await audit(client, organizationId, membershipId, "DIRECT_SHARE_SETTINGS_UPDATED",
-        { enabled: input.enabled, recipientLimit: input.recipientLimit, requestId });
-      return readSettings(client, organizationId);
+    return this.withAdmin(userId, organizationId, async (client) => {
+      const result = await client.query<{ updated: boolean }>(
+        "SELECT update_organization_direct_share_settings($1, $2, $3, $4) AS updated",
+        [organizationId, input.enabled, input.recipientLimit, requestId]);
+      return result.rows[0]?.updated ? readSettings(client, organizationId) : null;
     });
   }
 
@@ -77,16 +72,16 @@ export class PgDirectShareStore implements DirectShareStore {
       const known = await client.query<{ membership_id: string }>(
         "SELECT membership_id FROM knowledge_reader_directory('', $1::uuid[])", [requested]);
       if (known.rowCount !== requested.length) return { kind: "invalid-recipients" };
-      const existing = new Set((await client.query<{ recipient_membership_id: string }>(`SELECT recipient_membership_id
-        FROM private_item_share WHERE draft_id = $1 AND revoked_at IS NULL`, [draftId])).rows.map((row) => row.recipient_membership_id));
+      const existing = new Set((await client.query<{ recipient_membership_id: string }>(`SELECT recipient_id AS recipient_membership_id
+        FROM direct_share WHERE document_id = $1 AND revoked_at IS NULL`, [draftId])).rows.map((row) => row.recipient_membership_id));
       const added = requested.filter((id) => !existing.has(id));
       if (existing.size + added.length > settings.recipientLimit) return { kind: "limit", limit: settings.recipientLimit };
       for (const recipient of added) {
-        const inserted = await client.query<{ share_id: string }>(`INSERT INTO private_item_share
-            (organization_id, draft_id, owner_membership_id, recipient_membership_id)
+        const inserted = await client.query<{ share_id: string }>(`INSERT INTO direct_share
+            (organization_id, document_id, owner_id, recipient_id)
           VALUES ($1, $2, $3, $4)
-          ON CONFLICT (draft_id, recipient_membership_id) WHERE revoked_at IS NULL DO NOTHING
-          RETURNING share_id`, [organizationId, draftId, owner.membershipId, recipient]);
+          ON CONFLICT (document_id, recipient_id) WHERE revoked_at IS NULL DO NOTHING
+          RETURNING id AS share_id`, [organizationId, draftId, owner.membershipId, recipient]);
         const shareId = inserted.rows[0]?.share_id;
         if (shareId) {
           await audit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_SHARED",
@@ -101,10 +96,10 @@ export class PgDirectShareStore implements DirectShareStore {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await ownedItem(client, userId, organizationId, draftId, true);
       if (!owner) return null;
-      const revoked = await client.query<{ share_id: string }>(`UPDATE private_item_share
-          SET revoked_at = now(), revoked_by_membership_id = $2
-        WHERE draft_id = $1 AND owner_membership_id = $2 AND revoked_at IS NULL AND ($3::uuid IS NULL OR share_id = $3)
-        RETURNING share_id`, [draftId, owner.membershipId, shareId]);
+      const revoked = await client.query<{ share_id: string }>(`UPDATE direct_share
+          SET revoked_at = now(), revoked_by_id = $2
+        WHERE document_id = $1 AND owner_id = $2 AND revoked_at IS NULL AND ($3::uuid IS NULL OR id = $3)
+        RETURNING id AS share_id`, [draftId, owner.membershipId, shareId]);
       if (shareId && !revoked.rowCount) return null;
       if (revoked.rowCount) {
         await audit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_SHARE_REVOKED",
@@ -135,15 +130,15 @@ type SharedRow = { draft_id: string; title: string; mime_type: string; source_ur
 /** Items shared with the actor, as RLS lets the recipient read them; titles and owners only, never other items. */
 async function sharedItems(client: PoolClient, draftId: string | null): Promise<SharedItem[]> {
   const rows = (await client.query<SharedRow>(`
-    SELECT DISTINCT ON (d.draft_id) d.draft_id, d.title, v.mime_type, v.source_uri, v.content_hash, d.current_version_no,
-           s.owner_membership_id, s.created_at AS shared_at, d.updated_at
-      FROM private_item_share s
-      JOIN draft_document d ON d.draft_id = s.draft_id AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
-      JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
-     WHERE s.revoked_at IS NULL AND actor_owns_private_membership(s.recipient_membership_id)
-       AND actor_can_read_direct_share(d.draft_id)
-       AND ($1::uuid IS NULL OR d.draft_id = $1)
-     ORDER BY d.draft_id, s.created_at DESC`, [draftId])).rows
+    SELECT DISTINCT ON (d.id) d.id AS draft_id, d.title, v.mime_type, v.file_uri AS source_uri, v.content_hash, d.current_version_no,
+           s.owner_id AS owner_membership_id, s.created_at AS shared_at, d.updated_at
+      FROM direct_share s
+      JOIN private_document d ON d.id = s.document_id AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+      JOIN private_version v ON v.document_id = d.id AND v.version_no = d.current_version_no
+     WHERE s.revoked_at IS NULL AND actor_owns_private_membership(s.recipient_id)
+       AND actor_can_read_direct_share(d.id)
+       AND ($1::uuid IS NULL OR d.id = $1)
+     ORDER BY d.id, s.created_at DESC`, [draftId])).rows
     .sort((left, right) => right.shared_at.getTime() - left.shared_at.getTime()).slice(0, maxListedSharedItems);
   const owners = await directory(client, [...new Set(rows.map((row) => row.owner_membership_id))]);
   return rows.flatMap((row) => {
@@ -159,8 +154,8 @@ async function sharedItems(client: PoolClient, draftId: string | null): Promise<
 
 async function ownerShares(client: PoolClient, organizationId: string, draftId: string): Promise<OwnerShares> {
   const rows = (await client.query<{ share_id: string; recipient_membership_id: string; created_at: Date }>(`
-    SELECT share_id, recipient_membership_id, created_at FROM private_item_share
-     WHERE draft_id = $1 AND revoked_at IS NULL ORDER BY created_at, share_id`, [draftId])).rows;
+    SELECT id AS share_id, recipient_id AS recipient_membership_id, created_at FROM direct_share
+     WHERE document_id = $1 AND revoked_at IS NULL ORDER BY created_at, share_id`, [draftId])).rows;
   const people = await directory(client, rows.map((row) => row.recipient_membership_id));
   return {
     settings: await readSettings(client, organizationId),
@@ -180,16 +175,17 @@ async function directory(client: PoolClient, ids: string[]): Promise<Map<string,
 }
 
 async function readSettings(client: PoolClient, organizationId: string): Promise<DirectShareSettings> {
-  const row = (await client.query<{ enabled: boolean; recipient_limit: number }>(`SELECT enabled, recipient_limit
-    FROM organization_direct_share_setting WHERE organization_id = $1`, [organizationId])).rows[0];
+  const row = (await client.query<{ enabled: boolean; recipient_limit: number }>(`
+    SELECT direct_share_enabled AS enabled, direct_share_recipient_limit AS recipient_limit
+      FROM organization WHERE id = $1`, [organizationId])).rows[0];
   return row ? { enabled: row.enabled, recipientLimit: row.recipient_limit } : { ...defaultDirectShareSettings };
 }
 
 async function activeMembership(client: PoolClient, userId: string, organizationId: string): Promise<string | null> {
-  const row = (await client.query<{ membership_id: string }>(`SELECT om.membership_id FROM organization_membership om
-    JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-    JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-    WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId])).rows[0];
+  const row = (await client.query<{ membership_id: string }>(`SELECT om.id AS membership_id FROM membership om
+    JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+    JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+    WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId])).rows[0];
   return row?.membership_id ?? null;
 }
 
@@ -198,9 +194,9 @@ async function ownedItem(client: PoolClient, userId: string, organizationId: str
   lock: boolean): Promise<{ membershipId: string } | null> {
   const membershipId = await activeMembership(client, userId, organizationId);
   if (!membershipId) return null;
-  const row = await client.query(`SELECT d.draft_id FROM draft_document d
-    JOIN private_workspace w ON w.workspace_id = d.workspace_id
-    WHERE d.draft_id = $1 AND w.membership_id = $2 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+  const row = await client.query(`SELECT d.id AS draft_id FROM private_document d
+    JOIN private_workspace w ON w.id = d.workspace_id
+    WHERE d.id = $1 AND w.membership_id = $2 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
     ${lock ? "FOR UPDATE OF d" : ""}`, [draftId, membershipId]);
   return row.rowCount ? { membershipId } : null;
 }
@@ -208,6 +204,6 @@ async function ownedItem(client: PoolClient, userId: string, organizationId: str
 /** Audit details carry identifiers and counts only, never titles or content. */
 async function audit(client: PoolClient, organizationId: string, membershipId: string, eventType: string,
   details: Record<string, string | number | boolean>): Promise<void> {
-  await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+  await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
     VALUES ($1, $2, $3, 'SUCCESS', $4::jsonb)`, [organizationId, membershipId, eventType, JSON.stringify(details)]);
 }

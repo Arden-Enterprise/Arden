@@ -137,21 +137,22 @@ export class PrivateCollectionLimitError extends Error {
 
 async function ensureCollectionCapacity(client: PoolClient, workspaceId: string, adding: number): Promise<void> {
   if (adding <= 0) return;
-  const result = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM private_collection c
+  const result = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM private_folder c
     WHERE c.workspace_id = $1 AND ${activeCollection}`, [workspaceId]);
   if (Number(result.rows[0]?.count ?? 0) + adding > maxListedCollections) throw new PrivateCollectionLimitError();
 }
-const collectionColumns = `c.collection_id, c.title, c.parent_collection_id, c.favorited_at, c.created_at, c.updated_at`;
+const collectionColumns = `c.id AS collection_id, c.title, c.parent_folder_id AS parent_collection_id,
+  c.favorited_at, c.created_at, c.updated_at`;
 const activeCollection = `c.status = 'ACTIVE' AND c.trashed_at IS NULL`;
 /** A note shown in the private tree: live, not in trash, not archived. */
 const treeNote = `d.status = 'ACTIVE' AND d.trashed_at IS NULL AND d.archived_at IS NULL`;
 /** Order of notes inside one container (spec F03-ARR); the UI applies the same order. */
-const noteOrder = `d.sort_position ASC NULLS FIRST, d.created_at DESC, d.draft_id DESC`;
+const noteOrder = `d.position ASC NULLS FIRST, d.created_at DESC, d.id DESC`;
 const noteSummarySelect = `
-  SELECT d.draft_id, d.title, d.current_version_no, v.draft_version_id, v.mime_type, v.content_hash,
-         d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position, d.archived_at
-    FROM draft_document d
-    JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no`;
+  SELECT d.id AS draft_id, d.title, d.current_version_no, v.id AS draft_version_id, v.mime_type, v.content_hash,
+         d.created_at, d.updated_at, d.folder_id AS collection_id, d.favorited_at, d.position AS sort_position, d.archived_at
+    FROM private_document d
+    JOIN private_version v ON v.document_id = d.id AND v.version_no = d.current_version_no`;
 
 export class PgPrivateOrganizationStore implements PrivateOrganizationStore, PrivateTrashRetentionStore {
   constructor(private readonly withActor: ActorTransaction, private readonly withRetention: RetentionTransaction) {}
@@ -161,9 +162,9 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       const owner = await findOwner(client, userId, organizationId);
       if (!owner) return null;
       if (!owner.workspaceId) return [];
-      const result = await client.query<CollectionRow>(`SELECT ${collectionColumns} FROM private_collection c
+      const result = await client.query<CollectionRow>(`SELECT ${collectionColumns} FROM private_folder c
         WHERE c.workspace_id = $1 AND ${activeCollection}
-        ORDER BY c.created_at, c.collection_id LIMIT $2`, [owner.workspaceId, maxListedCollections]);
+        ORDER BY c.created_at, c.id LIMIT $2`, [owner.workspaceId, maxListedCollections]);
       return result.rows.map(mapCollection);
     });
   }
@@ -177,7 +178,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       await lockTree(client, workspaceId);
       if (input.parentId && !await isActiveCollection(client, workspaceId, input.parentId)) return null;
       await ensureCollectionCapacity(client, workspaceId, 1);
-      const inserted = await client.query<CollectionRow>(`INSERT INTO private_collection AS c (workspace_id, parent_collection_id, title)
+      const inserted = await client.query<CollectionRow>(`INSERT INTO private_folder AS c (workspace_id, parent_folder_id, title)
         VALUES ($1, $2, $3) RETURNING ${collectionColumns}`, [workspaceId, input.parentId, input.title]);
       const row = inserted.rows[0];
       if (!row) throw new Error("Private collection insert returned no row");
@@ -199,10 +200,10 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         if (!await isActiveCollection(client, workspaceId, parentId)) return { kind: "not-found" };
         if (parentId === collectionId || await isAncestor(client, workspaceId, collectionId, parentId)) return { kind: "cycle" };
       }
-      const updated = await client.query<CollectionRow>(`UPDATE private_collection c
+      const updated = await client.query<CollectionRow>(`UPDATE private_folder c
           SET title = COALESCE($3, c.title),
-              parent_collection_id = CASE WHEN $4::boolean THEN $5::uuid ELSE c.parent_collection_id END
-        WHERE c.collection_id = $1 AND c.workspace_id = $2 AND ${activeCollection}
+              parent_folder_id = CASE WHEN $4::boolean THEN $5::uuid ELSE c.parent_folder_id END
+        WHERE c.id = $1 AND c.workspace_id = $2 AND ${activeCollection}
         RETURNING ${collectionColumns}`, [collectionId, workspaceId, input.title ?? null, moving, input.parentId ?? null]);
       const row = updated.rows[0];
       if (!row) return { kind: "not-found" };
@@ -214,9 +215,9 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
-      const updated = await client.query<CollectionRow>(`UPDATE private_collection c
+      const updated = await client.query<CollectionRow>(`UPDATE private_folder c
           SET favorited_at = CASE WHEN $3::boolean THEN COALESCE(c.favorited_at, now()) ELSE NULL END
-        WHERE c.collection_id = $1 AND c.workspace_id = $2 AND ${activeCollection}
+        WHERE c.id = $1 AND c.workspace_id = $2 AND ${activeCollection}
         RETURNING ${collectionColumns}`, [collectionId, owner.workspaceId, favorite]);
       const row = updated.rows[0];
       return row ? mapCollection(row) : null;
@@ -230,21 +231,21 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       const workspaceId = owner.workspaceId;
       await lockTree(client, workspaceId);
       if (collectionId && !await isActiveCollection(client, workspaceId, collectionId)) return null;
-      const note = await client.query(`SELECT 1 FROM draft_document d
-        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND ${treeNote} FOR UPDATE`, [draftId, workspaceId]);
+      const note = await client.query(`SELECT 1 FROM private_document d
+        WHERE d.id = $1 AND d.workspace_id = $2 AND ${treeNote} FOR UPDATE`, [draftId, workspaceId]);
       if (!note.rowCount) return null;
       // Renumber the destination from 1 with the note inserted; only changed rows are written.
-      const siblings = await client.query<{ draft_id: string }>(`SELECT d.draft_id FROM draft_document d
-        WHERE d.workspace_id = $1 AND ${treeNote} AND d.collection_id IS NOT DISTINCT FROM $2::uuid AND d.draft_id <> $3
+      const siblings = await client.query<{ draft_id: string }>(`SELECT d.id AS draft_id FROM private_document d
+        WHERE d.workspace_id = $1 AND ${treeNote} AND d.folder_id IS NOT DISTINCT FROM $2::uuid AND d.id <> $3
         ORDER BY ${noteOrder}`, [workspaceId, collectionId, draftId]);
       const order = siblings.rows.map((row) => row.draft_id);
       order.splice(Math.min(index ?? order.length, order.length), 0, draftId);
-      await client.query(`UPDATE draft_document d
-          SET sort_position = o.position::integer,
-              collection_id = CASE WHEN d.draft_id = $3 THEN $2::uuid ELSE d.collection_id END
+      await client.query(`UPDATE private_document d
+          SET position = o.position::integer,
+              folder_id = CASE WHEN d.id = $3 THEN $2::uuid ELSE d.folder_id END
           FROM unnest($1::uuid[]) WITH ORDINALITY AS o(draft_id, position)
-        WHERE d.draft_id = o.draft_id AND d.workspace_id = $4
-          AND (d.draft_id = $3 OR d.sort_position IS DISTINCT FROM o.position::integer)`,
+        WHERE d.id = o.draft_id AND d.workspace_id = $4
+          AND (d.id = $3 OR d.position IS DISTINCT FROM o.position::integer)`,
       [order, collectionId, draftId, workspaceId]);
       return (await noteSummaries(client, workspaceId, organizationId, [draftId]))[0] ?? null;
     });
@@ -254,9 +255,9 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
-      const updated = await client.query(`UPDATE draft_document d
+      const updated = await client.query(`UPDATE private_document d
           SET favorited_at = CASE WHEN $3::boolean THEN COALESCE(d.favorited_at, now()) ELSE NULL END
-        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND ${treeNote}`,
+        WHERE d.id = $1 AND d.workspace_id = $2 AND ${treeNote}`,
       [draftId, owner.workspaceId, favorite]);
       if (!updated.rowCount) return null;
       return (await noteSummaries(client, owner.workspaceId, organizationId, [draftId]))[0] ?? null;
@@ -269,19 +270,19 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (!owner?.workspaceId) return null;
       const workspaceId = owner.workspaceId;
       await lockTree(client, workspaceId);
-      const current = await client.query<{ archived_at: Date | null; collection_id: string | null }>(`SELECT d.archived_at, d.collection_id
-        FROM draft_document d WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+      const current = await client.query<{ archived_at: Date | null; collection_id: string | null }>(`SELECT d.archived_at, d.folder_id AS collection_id
+        FROM private_document d WHERE d.id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
         FOR UPDATE`, [draftId, workspaceId]);
       const row = current.rows[0];
       if (!row) return null;
       if ((row.archived_at !== null) !== archived) {
         if (archived) {
-          await client.query(`UPDATE draft_document SET archived_at = now() WHERE draft_id = $1 AND workspace_id = $2`, [draftId, workspaceId]);
+          await client.query(`UPDATE private_document SET archived_at = now() WHERE id = $1 AND workspace_id = $2`, [draftId, workspaceId]);
         } else {
           // Back to its collection while that collection is active, otherwise to the root; it shows first there.
           const collectionId = row.collection_id && await isActiveCollection(client, workspaceId, row.collection_id) ? row.collection_id : null;
-          await client.query(`UPDATE draft_document SET archived_at = NULL, collection_id = $3, sort_position = NULL
-            WHERE draft_id = $1 AND workspace_id = $2`, [draftId, workspaceId, collectionId]);
+          await client.query(`UPDATE private_document SET archived_at = NULL, folder_id = $3, position = NULL
+            WHERE id = $1 AND workspace_id = $2`, [draftId, workspaceId, collectionId]);
         }
       }
       return (await noteSummaries(client, workspaceId, organizationId, [draftId]))[0] ?? null;
@@ -296,11 +297,11 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       const result = await client.query<{
         draft_id: string; title: string; collection_id: string | null; collection_title: string | null;
         archived_at: Date; created_at: Date; updated_at: Date;
-      }>(`SELECT d.draft_id, d.title, d.collection_id, c.title AS collection_title, d.archived_at, d.created_at, d.updated_at
-          FROM draft_document d
-          LEFT JOIN private_collection c ON c.collection_id = d.collection_id AND c.workspace_id = d.workspace_id AND ${activeCollection}
+      }>(`SELECT d.id AS draft_id, d.title, d.folder_id AS collection_id, c.title AS collection_title, d.archived_at, d.created_at, d.updated_at
+          FROM private_document d
+          LEFT JOIN private_folder c ON c.id = d.folder_id AND c.workspace_id = d.workspace_id AND ${activeCollection}
          WHERE d.workspace_id = $1 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL AND d.archived_at IS NOT NULL
-         ORDER BY d.archived_at DESC, d.draft_id DESC
+         ORDER BY d.archived_at DESC, d.id DESC
          LIMIT $2`, [owner.workspaceId, maxListedArchivedNotes + 1]);
       return {
         items: result.rows.slice(0, maxListedArchivedNotes).map((row) => ({
@@ -365,8 +366,8 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       const collections: PrivateCollection[] = [];
       for (const collection of current.collections) {
         const isRoot = collection.id === current.root.id;
-        const inserted = await client.query<CollectionRow>(`INSERT INTO private_collection AS c
-            (collection_id, workspace_id, parent_collection_id, title)
+        const inserted = await client.query<CollectionRow>(`INSERT INTO private_folder AS c
+            (id, workspace_id, parent_folder_id, title)
           VALUES ($1, $2, $3, $4) RETURNING ${collectionColumns}`, [
           newIds.get(collection.id), workspaceId,
           isRoot ? collection.parentId : newIds.get(collection.parentId ?? "") ?? null,
@@ -394,8 +395,8 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       await lockTree(client, owner.workspaceId);
       const batchId = randomUUID();
       // An archived note can be moved to trash too; restoring it brings it back to the tree.
-      const trashed = await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3, archived_at = NULL
-        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
+      const trashed = await client.query(`UPDATE private_document d SET trashed_at = now(), trash_batch_id = $3, archived_at = NULL
+        WHERE d.id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
       [draftId, owner.workspaceId, batchId]);
       if (!trashed.rowCount) return null;
       await revokeBatchShares(client, organizationId, owner.membershipId, batchId, requestId);
@@ -413,11 +414,11 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (subtree.length === 0) return null;
       const batchId = randomUUID();
       // Notes before collections: every tree writer uses this order under the workspace lock.
-      await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3
-        WHERE d.workspace_id = $1 AND d.collection_id = ANY($2::uuid[]) AND ${treeNote}`,
+      await client.query(`UPDATE private_document d SET trashed_at = now(), trash_batch_id = $3
+        WHERE d.workspace_id = $1 AND d.folder_id = ANY($2::uuid[]) AND ${treeNote}`,
       [workspaceId, subtree, batchId]);
-      await client.query(`UPDATE private_collection c SET trashed_at = now(), trash_batch_id = $3
-        WHERE c.workspace_id = $1 AND c.collection_id = ANY($2::uuid[]) AND ${activeCollection}`,
+      await client.query(`UPDATE private_folder c SET trashed_at = now(), trash_batch_id = $3
+        WHERE c.workspace_id = $1 AND c.id = ANY($2::uuid[]) AND ${activeCollection}`,
       [workspaceId, subtree, batchId]);
       await revokeBatchShares(client, organizationId, owner.membershipId, batchId, requestId);
       return requireEntry(await trashEntries(client, workspaceId, batchId));
@@ -445,19 +446,19 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (root.parent_id && !await isActiveCollection(client, workspaceId, root.parent_id)) {
         // The original parent was trashed or purged: the batch root returns to the workspace root.
         if (root.kind === "note") {
-          await client.query(`UPDATE draft_document SET collection_id = NULL WHERE draft_id = $1 AND workspace_id = $2`, [root.id, workspaceId]);
+          await client.query(`UPDATE private_document SET folder_id = NULL WHERE id = $1 AND workspace_id = $2`, [root.id, workspaceId]);
         } else {
-          await client.query(`UPDATE private_collection SET parent_collection_id = NULL WHERE collection_id = $1 AND workspace_id = $2`, [root.id, workspaceId]);
+          await client.query(`UPDATE private_folder SET parent_folder_id = NULL WHERE id = $1 AND workspace_id = $2`, [root.id, workspaceId]);
         }
       }
-      await client.query(`UPDATE draft_document d SET trashed_at = NULL, trash_batch_id = NULL
+      await client.query(`UPDATE private_document d SET trashed_at = NULL, trash_batch_id = NULL
         WHERE d.workspace_id = $1 AND d.trash_batch_id = $2 AND d.status = 'ACTIVE'`, [workspaceId, batchId]);
-      await client.query(`UPDATE private_collection c SET trashed_at = NULL, trash_batch_id = NULL
+      await client.query(`UPDATE private_folder c SET trashed_at = NULL, trash_batch_id = NULL
         WHERE c.workspace_id = $1 AND c.trash_batch_id = $2 AND c.status = 'ACTIVE'`, [workspaceId, batchId]);
       const collectionIds = items.filter((item) => item.kind === "collection").map((item) => item.id);
       const collections = collectionIds.length ? (await client.query<CollectionRow>(`SELECT ${collectionColumns}
-        FROM private_collection c WHERE c.workspace_id = $1 AND c.collection_id = ANY($2::uuid[])
-        ORDER BY c.created_at, c.collection_id`, [workspaceId, collectionIds])).rows.map(mapCollection) : [];
+        FROM private_folder c WHERE c.workspace_id = $1 AND c.id = ANY($2::uuid[])
+        ORDER BY c.created_at, c.id`, [workspaceId, collectionIds])).rows.map(mapCollection) : [];
       const notes = await noteSummaries(client, workspaceId, organizationId,
         items.filter((item) => item.kind === "note").map((item) => item.id));
       return { collections, notes };
@@ -497,10 +498,10 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       // purged notes whose content erasure is still pending.
       const candidates = await client.query<{ trash_batch_id: string; workspace_id: string }>(`
         SELECT trash_batch_id, workspace_id FROM (
-          SELECT trash_batch_id, workspace_id, trashed_at FROM draft_document
+          SELECT trash_batch_id, workspace_id, trashed_at FROM private_document
            WHERE status = 'ACTIVE' AND trashed_at < $1
           UNION ALL
-          SELECT trash_batch_id, workspace_id, trashed_at FROM private_collection
+          SELECT trash_batch_id, workspace_id, trashed_at FROM private_folder
            WHERE status = 'ACTIVE' AND trashed_at < $1
         ) expired
         GROUP BY trash_batch_id, workspace_id
@@ -512,7 +513,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         const tombstoned = await tombstoneBatch(client, candidate.workspace_id, candidate.trash_batch_id, cutoff);
         if (tombstoned !== null) purgedBatches += 1;
       }
-      const pending = await client.query<{ draft_id: string }>(`SELECT draft_id FROM draft_document
+      const pending = await client.query<{ draft_id: string }>(`SELECT id AS draft_id FROM private_document
         WHERE status = 'PURGED' AND content_purged_at IS NULL ORDER BY updated_at, draft_id LIMIT 1000`);
       return { purgedBatches, content: await contentObjects(client, pending.rows.map((row) => row.draft_id)) };
     });
@@ -521,12 +522,12 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
 
 async function findOwner(client: PoolClient, userId: string, organizationId: string): Promise<Owner | null> {
   const result = await client.query<{ membership_id: string; workspace_id: string | null }>(`
-    SELECT om.membership_id, w.workspace_id
-      FROM organization_membership om
-      JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-      JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-      LEFT JOIN private_workspace w ON w.membership_id = om.membership_id AND w.status = 'ACTIVE'
-     WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+    SELECT om.id AS membership_id, w.id AS workspace_id
+      FROM membership om
+      JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+      JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+      LEFT JOIN private_workspace w ON w.membership_id = om.id AND w.status = 'ACTIVE'
+     WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
   const row = result.rows[0];
   return row ? { membershipId: row.membership_id, workspaceId: row.workspace_id } : null;
 }
@@ -534,7 +535,7 @@ async function findOwner(client: PoolClient, userId: string, organizationId: str
 async function ensureWorkspace(client: PoolClient, membershipId: string): Promise<string | null> {
   await client.query(`INSERT INTO private_workspace (membership_id, name) VALUES ($1, 'Private workspace')
     ON CONFLICT (membership_id) DO NOTHING`, [membershipId]);
-  const workspace = await client.query<{ workspace_id: string }>(`SELECT workspace_id FROM private_workspace
+  const workspace = await client.query<{ workspace_id: string }>(`SELECT id AS workspace_id FROM private_workspace
     WHERE membership_id = $1 AND status = 'ACTIVE'`, [membershipId]);
   return workspace.rows[0]?.workspace_id ?? null;
 }
@@ -545,8 +546,8 @@ export async function lockTree(client: PoolClient, workspaceId: string): Promise
 }
 
 export async function isActiveCollection(client: PoolClient, workspaceId: string, collectionId: string): Promise<boolean> {
-  const result = await client.query(`SELECT 1 FROM private_collection c
-    WHERE c.collection_id = $1 AND c.workspace_id = $2 AND ${activeCollection}`, [collectionId, workspaceId]);
+  const result = await client.query(`SELECT 1 FROM private_folder c
+    WHERE c.id = $1 AND c.workspace_id = $2 AND ${activeCollection}`, [collectionId, workspaceId]);
   return result.rowCount === 1;
 }
 
@@ -555,19 +556,19 @@ async function isAncestor(client: PoolClient, workspaceId: string, ancestorId: s
   const result = await client.query(`WITH RECURSIVE chain(collection_id, depth) AS (
       SELECT $2::uuid, 0
       UNION ALL
-      SELECT c.parent_collection_id, chain.depth + 1 FROM private_collection c
-        JOIN chain ON chain.collection_id = c.collection_id
-       WHERE c.workspace_id = $3 AND c.parent_collection_id IS NOT NULL AND chain.depth < 10000
+      SELECT c.parent_folder_id AS parent_collection_id, chain.depth + 1 FROM private_folder c
+        JOIN chain ON chain.collection_id = c.id
+       WHERE c.workspace_id = $3 AND c.parent_folder_id IS NOT NULL AND chain.depth < 10000
     ) SELECT 1 FROM chain WHERE collection_id = $1 LIMIT 1`, [ancestorId, collectionId, workspaceId]);
   return result.rowCount === 1;
 }
 
 async function activeSubtreeIds(client: PoolClient, workspaceId: string, collectionId: string): Promise<string[]> {
   const result = await client.query<{ collection_id: string }>(`WITH RECURSIVE tree(collection_id) AS (
-      SELECT c.collection_id FROM private_collection c
-       WHERE c.collection_id = $2 AND c.workspace_id = $1 AND ${activeCollection}
+      SELECT c.id AS collection_id FROM private_folder c
+       WHERE c.id = $2 AND c.workspace_id = $1 AND ${activeCollection}
       UNION
-      SELECT c.collection_id FROM private_collection c JOIN tree ON c.parent_collection_id = tree.collection_id
+      SELECT c.id AS collection_id FROM private_folder c JOIN tree ON c.parent_folder_id = tree.collection_id
        WHERE c.workspace_id = $1 AND ${activeCollection}
     ) SELECT collection_id FROM tree`, [workspaceId, collectionId]);
   return result.rows.map((row) => row.collection_id);
@@ -575,13 +576,13 @@ async function activeSubtreeIds(client: PoolClient, workspaceId: string, collect
 
 async function readSubtree(client: PoolClient, workspaceId: string, collectionId: string): Promise<PrivateCollectionSubtree | null> {
   const collections = await client.query<CollectionRow & { depth: number }>(`WITH RECURSIVE tree(collection_id, depth) AS (
-      SELECT c.collection_id, 0 FROM private_collection c
-       WHERE c.collection_id = $2 AND c.workspace_id = $1 AND ${activeCollection}
+      SELECT c.id AS collection_id, 0 FROM private_folder c
+       WHERE c.id = $2 AND c.workspace_id = $1 AND ${activeCollection}
       UNION
-      SELECT c.collection_id, tree.depth + 1 FROM private_collection c JOIN tree ON c.parent_collection_id = tree.collection_id
+      SELECT c.id AS collection_id, tree.depth + 1 FROM private_folder c JOIN tree ON c.parent_folder_id = tree.collection_id
        WHERE c.workspace_id = $1 AND ${activeCollection}
-    ) SELECT ${collectionColumns}, tree.depth FROM tree JOIN private_collection c USING (collection_id)
-      ORDER BY tree.depth, c.created_at, c.collection_id`, [workspaceId, collectionId]);
+    ) SELECT ${collectionColumns}, tree.depth FROM tree JOIN private_folder c ON tree.collection_id = c.id
+      ORDER BY tree.depth, c.created_at, c.id`, [workspaceId, collectionId]);
   const mapped = collections.rows.map(mapCollection);
   const root = mapped[0];
   if (!root) return null;
@@ -601,13 +602,13 @@ async function noteSources(client: PoolClient, workspaceId: string,
   filter: { draftIds: string[] } | { collectionIds: string[] }): Promise<PrivateNoteSource[]> {
   const byDraft = "draftIds" in filter;
   const result = await client.query<NoteSourceRow>(`
-    SELECT d.draft_id, d.title, d.collection_id, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
-           v.text_source_uri, v.text_content_hash
-      FROM draft_document d
-      JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
+    SELECT d.id AS draft_id, d.title, d.folder_id AS collection_id, v.id AS draft_version_id, v.file_uri AS source_uri, v.mime_type, v.content_hash,
+           v.text_uri AS text_source_uri, v.text_content_hash
+      FROM private_document d
+      JOIN private_version v ON v.document_id = d.id AND v.version_no = d.current_version_no
      WHERE d.workspace_id = $1 AND ${treeNote}
-       AND ${byDraft ? "d.draft_id" : "d.collection_id"} = ANY($2::uuid[])
-     ORDER BY d.created_at, d.draft_id`, [workspaceId, byDraft ? filter.draftIds : filter.collectionIds]);
+       AND ${byDraft ? "d.id" : "d.folder_id"} = ANY($2::uuid[])
+     ORDER BY d.created_at, d.id`, [workspaceId, byDraft ? filter.draftIds : filter.collectionIds]);
   return result.rows.map((row) => ({
     id: row.draft_id, title: row.title, collectionId: row.collection_id, versionId: row.draft_version_id,
     sourceUri: row.source_uri, mimeType: row.mime_type, contentHash: row.content_hash,
@@ -618,26 +619,26 @@ async function noteSources(client: PoolClient, workspaceId: string,
 async function noteSummaries(client: PoolClient, workspaceId: string, organizationId: string, draftIds: string[]): Promise<DraftListItem[]> {
   if (draftIds.length === 0) return [];
   const result = await client.query<NoteSummaryRow>(`${noteSummarySelect}
-     WHERE d.workspace_id = $1 AND d.draft_id = ANY($2::uuid[]) AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
-     ORDER BY d.created_at, d.draft_id`, [workspaceId, draftIds]);
+     WHERE d.workspace_id = $1 AND d.id = ANY($2::uuid[]) AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+     ORDER BY d.created_at, d.id`, [workspaceId, draftIds]);
   return result.rows.map((row) => mapNoteSummary(row, organizationId));
 }
 
 async function insertNoteCopy(client: PoolClient, owner: Owner, collectionId: string | null, title: string,
   copy: StoredContentFields): Promise<{ draftId: string; versionId: string; createdAt: Date; updatedAt: Date }> {
-  const draft = await client.query<{ draft_id: string }>(`INSERT INTO draft_document
-      (workspace_id, title, current_version_no, collection_id)
-    VALUES ($1, $2, 1, $3) RETURNING draft_id`, [owner.workspaceId, title, collectionId]);
+  const draft = await client.query<{ draft_id: string }>(`INSERT INTO private_document
+      (workspace_id, title, current_version_no, folder_id)
+    VALUES ($1, $2, 1, $3) RETURNING id AS draft_id`, [owner.workspaceId, title, collectionId]);
   const draftId = draft.rows[0]?.draft_id;
   if (!draftId) throw new Error("Private note copy returned no row");
-  const version = await client.query<{ draft_version_id: string }>(`INSERT INTO draft_version
-      (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id, text_source_uri, text_content_hash)
-    VALUES ($1, 1, $2, $3, $4, $5, $6, $7) RETURNING draft_version_id`,
+  const version = await client.query<{ draft_version_id: string }>(`INSERT INTO private_version
+      (document_id, version_no, file_uri, mime_type, content_hash, created_by_id, text_uri, text_content_hash)
+    VALUES ($1, 1, $2, $3, $4, $5, $6, $7) RETURNING id AS draft_version_id`,
   [draftId, copy.sourceUri, copy.mimeType, copy.contentHash, owner.membershipId, copy.text?.sourceUri ?? null, copy.text?.contentHash ?? null]);
   const versionId = version.rows[0]?.draft_version_id;
   if (!versionId) throw new Error("Private note copy version returned no row");
   const timestamps = await client.query<{ created_at: Date; updated_at: Date }>(`SELECT created_at, updated_at
-    FROM draft_document WHERE draft_id = $1`, [draftId]);
+    FROM private_document WHERE id = $1`, [draftId]);
   const row = timestamps.rows[0];
   if (!row) throw new Error("Private note copy disappeared within transaction");
   return { draftId, versionId, createdAt: row.created_at, updatedAt: row.updated_at };
@@ -645,11 +646,11 @@ async function insertNoteCopy(client: PoolClient, owner: Owner, collectionId: st
 
 async function batchItems(client: PoolClient, workspaceId: string, batchId: string): Promise<BatchItemRow[]> {
   const result = await client.query<BatchItemRow>(`
-    SELECT 'note' AS kind, d.draft_id AS id, d.collection_id AS parent_id, d.trashed_at
-      FROM draft_document d WHERE d.workspace_id = $1 AND d.trash_batch_id = $2 AND d.status = 'ACTIVE'
+    SELECT 'note' AS kind, d.id AS id, d.folder_id AS parent_id, d.trashed_at
+      FROM private_document d WHERE d.workspace_id = $1 AND d.trash_batch_id = $2 AND d.status = 'ACTIVE'
     UNION ALL
-    SELECT 'collection', c.collection_id, c.parent_collection_id, c.trashed_at
-      FROM private_collection c WHERE c.workspace_id = $1 AND c.trash_batch_id = $2 AND c.status = 'ACTIVE'`,
+    SELECT 'collection', c.id AS collection_id, c.parent_folder_id AS parent_collection_id, c.trashed_at
+      FROM private_folder c WHERE c.workspace_id = $1 AND c.trash_batch_id = $2 AND c.status = 'ACTIVE'`,
   [workspaceId, batchId]);
   return result.rows;
 }
@@ -665,14 +666,14 @@ async function trashEntries(client: PoolClient, workspaceId: string, batchId: st
     trash_batch_id: string; kind: "note" | "collection"; id: string; title: string;
     trashed_at: Date; item_count: string; from_title: string | null;
   }>(`WITH items AS (
-      SELECT 'collection' AS kind, c.collection_id AS id, c.title, c.parent_collection_id AS parent_id,
+      SELECT 'collection' AS kind, c.id AS id, c.title, c.parent_folder_id AS parent_id,
              c.trash_batch_id, c.trashed_at
-        FROM private_collection c
+        FROM private_folder c
        WHERE c.workspace_id = $1 AND c.status = 'ACTIVE' AND c.trash_batch_id IS NOT NULL
          AND ($2::uuid IS NULL OR c.trash_batch_id = $2)
       UNION ALL
-      SELECT 'note', d.draft_id, d.title, d.collection_id, d.trash_batch_id, d.trashed_at
-        FROM draft_document d
+      SELECT 'note', d.id AS draft_id, d.title, d.folder_id AS collection_id, d.trash_batch_id, d.trashed_at
+        FROM private_document d
        WHERE d.workspace_id = $1 AND d.status = 'ACTIVE' AND d.trash_batch_id IS NOT NULL
          AND ($2::uuid IS NULL OR d.trash_batch_id = $2)
     )
@@ -680,7 +681,7 @@ async function trashEntries(client: PoolClient, workspaceId: string, batchId: st
            (SELECT count(*) FROM items member WHERE member.trash_batch_id = root.trash_batch_id)::text AS item_count,
            parent.title AS from_title
       FROM items root
-      LEFT JOIN private_collection parent ON parent.collection_id = root.parent_id
+      LEFT JOIN private_folder parent ON parent.id = root.parent_id
        AND parent.workspace_id = $1 AND parent.status = 'ACTIVE'
      WHERE NOT EXISTS (SELECT 1 FROM items member
                         WHERE member.kind = 'collection' AND member.id = root.parent_id
@@ -705,14 +706,14 @@ function requireEntry(entries: PrivateTrashEntry[]): PrivateTrashEntry {
  * trashed before it are touched (retention job).
  */
 async function tombstoneBatch(client: PoolClient, workspaceId: string, batchId: string, cutoff: Date | null): Promise<PurgedPrivateContent | null> {
-  const notes = await client.query<{ draft_id: string }>(`SELECT draft_id FROM draft_document
+  const notes = await client.query<{ draft_id: string }>(`SELECT id AS draft_id FROM private_document
     WHERE workspace_id = $3 AND trash_batch_id = $1 AND status = 'ACTIVE' AND ($2::timestamptz IS NULL OR trashed_at < $2)`, [batchId, cutoff, workspaceId]);
   const draftIds = notes.rows.map((row) => row.draft_id);
   const content = await contentObjects(client, draftIds);
-  const purgedNotes = await client.query(`UPDATE draft_document
+  const purgedNotes = await client.query(`UPDATE private_document
       SET status = 'PURGED', title = '', description = NULL, favorited_at = NULL, content_purged_at = NULL
     WHERE workspace_id = $3 AND trash_batch_id = $1 AND status = 'ACTIVE' AND ($2::timestamptz IS NULL OR trashed_at < $2)`, [batchId, cutoff, workspaceId]);
-  const purgedCollections = await client.query(`UPDATE private_collection
+  const purgedCollections = await client.query(`UPDATE private_folder
       SET status = 'PURGED', title = '', favorited_at = NULL
     WHERE workspace_id = $3 AND trash_batch_id = $1 AND status = 'ACTIVE' AND ($2::timestamptz IS NULL OR trashed_at < $2)`, [batchId, cutoff, workspaceId]);
   return (purgedNotes.rowCount ?? 0) + (purgedCollections.rowCount ?? 0) > 0 ? content : null;
@@ -722,9 +723,9 @@ async function contentObjects(client: PoolClient, draftIds: string[]): Promise<P
   if (draftIds.length === 0) return [];
   // Decision 0034: a PDF item's extracted text object is erased with its file.
   const versions = await client.query<{ draft_id: string; source_uri: string }>(`SELECT DISTINCT draft_id, source_uri FROM (
-      SELECT draft_id, source_uri FROM draft_version WHERE draft_id = ANY($1::uuid[])
+      SELECT document_id AS draft_id, file_uri AS source_uri FROM private_version WHERE document_id = ANY($1::uuid[])
       UNION ALL
-      SELECT draft_id, text_source_uri FROM draft_version WHERE draft_id = ANY($1::uuid[]) AND text_source_uri IS NOT NULL
+      SELECT document_id AS draft_id, text_uri AS text_source_uri FROM private_version WHERE document_id = ANY($1::uuid[]) AND text_uri IS NOT NULL
     ) objects ORDER BY draft_id, source_uri`, [draftIds]);
   const byDraft = new Map<string, string[]>(draftIds.map((id) => [id, []]));
   for (const row of versions.rows) byDraft.get(row.draft_id)?.push(row.source_uri);
@@ -738,10 +739,10 @@ async function contentObjects(client: PoolClient, draftIds: string[]): Promise<P
 async function revokeBatchShares(client: PoolClient, organizationId: string, ownerMembershipId: string, batchId: string, requestId: string): Promise<void> {
   const revoked = await client.query<{ draft_id: string; count: number }>(`
     WITH revoked AS (
-      UPDATE private_item_share s SET revoked_at = now(), revoked_by_membership_id = $1
-      WHERE s.owner_membership_id = $1 AND s.revoked_at IS NULL
-        AND s.draft_id IN (SELECT d.draft_id FROM draft_document d WHERE d.trash_batch_id = $2)
-      RETURNING s.draft_id
+      UPDATE direct_share s SET revoked_at = now(), revoked_by_id = $1
+      WHERE s.owner_id = $1 AND s.revoked_at IS NULL
+        AND s.document_id IN (SELECT d.id AS draft_id FROM private_document d WHERE d.trash_batch_id = $2)
+      RETURNING s.document_id AS draft_id
     )
     SELECT draft_id, count(*)::integer AS count FROM revoked GROUP BY draft_id`, [ownerMembershipId, batchId]);
   for (const row of revoked.rows) {
@@ -751,8 +752,8 @@ async function revokeBatchShares(client: PoolClient, organizationId: string, own
 }
 
 async function markErased(client: PoolClient, draftIds: string[], workspaceId: string | null): Promise<void> {
-  await client.query(`UPDATE draft_document SET content_purged_at = now()
-    WHERE draft_id = ANY($1::uuid[]) AND status = 'PURGED' AND content_purged_at IS NULL
+  await client.query(`UPDATE private_document SET content_purged_at = now()
+    WHERE id = ANY($1::uuid[]) AND status = 'PURGED' AND content_purged_at IS NULL
       AND ($2::uuid IS NULL OR workspace_id = $2)`, [draftIds, workspaceId]);
 }
 
@@ -762,7 +763,7 @@ async function markErased(client: PoolClient, draftIds: string[], workspaceId: s
  */
 async function appendPrivateAudit(client: PoolClient, organizationId: string, membershipId: string,
   eventType: string, details: Record<string, string | number | boolean>): Promise<void> {
-  await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+  await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
     VALUES ($1, $2, $3, 'SUCCESS', $4::jsonb)`, [organizationId, membershipId, eventType, JSON.stringify(details)]);
 }
 

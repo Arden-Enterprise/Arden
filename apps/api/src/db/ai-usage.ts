@@ -6,10 +6,10 @@ import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
  * first appears so PostgreSQL infers one type per parameter. `ON CONFLICT DO NOTHING` has
  * no conflict target on purpose: an arbiter column makes PostgreSQL apply the table's
  * SELECT policies to the proposed row, and tenant sessions intentionally have no SELECT
- * policy on `ai_usage_event`. The unique `idempotency_key` still discards retried events.
+ * policy on `ai_usage`. The unique `idempotency_key` still discards retried events.
  */
-const insertAiUsageEventSql = `INSERT INTO ai_usage_event(organization_id, request_id, idempotency_key,
-    operation, provider, model, input_tokens, output_tokens, latency_ms, usage_complete,
+const insertAiUsageEventSql = `INSERT INTO ai_usage(organization_id, request_id, idempotency_key,
+    operation, provider, model, input_tokens, output_tokens, latency_ms, is_complete,
     estimated_cost_micro_usd, price_book_version)
   SELECT $1::uuid, $2::uuid, $2::uuid::text || ':' || $3::text, $4::text, $5::text, $6::text,
     $7::bigint, $8::bigint, $9::integer, $10::boolean,
@@ -20,7 +20,7 @@ const insertAiUsageEventSql = `INSERT INTO ai_usage_event(organization_id, reque
   FROM (SELECT 1) seed LEFT JOIN LATERAL (
     SELECT pb.price_book_version, pb.input_micro_usd_per_million_tokens,
       pb.output_micro_usd_per_million_tokens
-    FROM ai_price_book pb WHERE pb.provider = $5::text AND pb.model = $6::text
+    FROM price_book pb WHERE pb.provider = $5::text AND pb.model = $6::text
       AND pb.effective_from <= now() AND (pb.effective_until IS NULL OR pb.effective_until > now())
     ORDER BY pb.effective_from DESC LIMIT 1) price ON true
   ON CONFLICT DO NOTHING`;

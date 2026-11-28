@@ -7,7 +7,7 @@ const grant = {
   membershipId: "reviewer", organizationId: "org", scope: "DEPARTMENT" as const,
   departmentId: "engineering", status: "ACTIVE" as const,
   classifications: ["INTERNAL" as const], level: "STANDARD" as const,
-  teamTag: null, projectTag: null, validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
+  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
 };
 const facts: ReviewDecisionFacts = {
   actor: { membershipId: "reviewer", organizationId: "org", status: "ACTIVE" },
@@ -15,9 +15,9 @@ const facts: ReviewDecisionFacts = {
     submissionId: "submission", snapshotVersionId: "version-2", contentHash: hash,
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
     status: "PENDING_REVIEW", classification: "INTERNAL", policyVersion: 1,
-    teamTag: null, projectTag: null, audienceBreadth: "LIMITED", reviewRule: "GRANT_SCOPE",
+    readerBreadth: "LIMITED", reviewRule: "GRANT_SCOPE",
   },
-  reviewerGrants: [grant], effectivePolicyVersion: 1, audienceEnforceable: true,
+  reviewerGrants: [grant], effectivePolicyVersion: 1, readersEnforceable: true,
   policy: { kind: "SINGLE_REVIEWER" }, now,
 };
 const request: ReviewDecisionRequest = {
@@ -88,14 +88,14 @@ describe("planReviewDecision", () => {
   });
 
   it("blocks approval for unenforceable audience or unsupported multi-step policy", () => {
-    expect(planReviewDecision({ ...facts, audienceEnforceable: false }, request))
+    expect(planReviewDecision({ ...facts, readersEnforceable: false }, request))
       .toEqual({ kind: "DENIED", reason: "AUDIENCE_NOT_ENFORCEABLE" });
     expect(planReviewDecision({ ...facts, policy: { kind: "UNSUPPORTED" } }, request))
       .toEqual({ kind: "DENIED", reason: "UNSUPPORTED_POLICY" });
   });
 
   it("allows rejection with a reason but never emits publication intent", () => {
-    const blocked = { ...facts, audienceEnforceable: false };
+    const blocked = { ...facts, readersEnforceable: false };
     expect(planReviewDecision(blocked, { ...request, action: "REJECT", comment: "Not suitable" }))
       .toEqual({ kind: "RECORD_ONLY", decision: "REJECTED", comment: "Not suitable" });
     expect(planReviewDecision(blocked, { ...request, action: "REJECT", comment: "  " }))

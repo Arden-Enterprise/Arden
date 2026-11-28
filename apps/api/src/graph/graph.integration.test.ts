@@ -21,8 +21,6 @@ const ids = {
   orgA: id(),
   orgB: id(),
   scopeA: id(),
-  allMembersA: id(),
-  allMembersB: id(),
   admin: id(),
   author: id(),
   engineer: id(),
@@ -95,7 +93,6 @@ async function seedPublishedDocument(
     knowledgeBaseId: string;
     targetScopeType: "ORGANIZATION" | "DEPARTMENT";
     targetDepartmentId: string | null;
-    audienceRoleIds: string[];
     readerSelectionId: string;
     title: string;
     management: KnowledgeMetadata | null;
@@ -111,10 +108,10 @@ async function seedPublishedDocument(
   const contentUri = `arden-private-object://${input.documentId}`;
 
   await client.query(`
-    INSERT INTO shared_draft (
-      shared_draft_id, organization_id, author_membership_id, title, classification,
-      status, responsible_department_id, target_scope_type, current_version_no,
-      management, draft_selection_id
+    INSERT INTO company_document (
+      id, organization_id, author_id, title, classification,
+      status, owner_department_id, target_scope, current_version_no,
+      metadata, reader_policy_id
     ) VALUES ($1, $2, $3, $4, 'INTERNAL', 'ACTIVE', $5, $6, 1, $7::jsonb, $8)`, [
     input.documentId,
     input.organizationId,
@@ -127,8 +124,8 @@ async function seedPublishedDocument(
   ]);
 
   await client.query(`
-    INSERT INTO shared_draft_version (
-      shared_draft_version_id, shared_draft_id, version_no, content_uri, mime_type, content_hash
+    INSERT INTO working_version (
+      id, document_id, version_no, file_uri, mime_type, content_hash
     ) VALUES ($1, $2, 1, $3, 'text/plain', $4)`, [
     draftVersionId,
     input.documentId,
@@ -137,15 +134,15 @@ async function seedPublishedDocument(
   ]);
 
   await client.query(`
-    INSERT INTO shared_submission (
-      submission_id, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-      submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id,
-      title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
-      content_hash, status, publication_state, submit_request_id, proposed_selection_id,
-      approved_selection_id, management
+    INSERT INTO review_submission (
+      id, organization_id, document_id, working_version_id, snapshot_version_no,
+      submitted_by_id, target_scope, target_department_id, owner_department_id,
+      title, classification, policy_version, review_rule, file_uri, mime_type,
+      content_hash, status, publication_state, submit_request_id, proposed_reader_policy_id,
+      approved_reader_policy_id, metadata
     ) VALUES (
-      $1, $2, $3, $4, 1, $5, $6, $7, $8, $9, 'INTERNAL', $10::uuid[], 1, 'GRANT_SCOPE',
-      $11, 'text/plain', $12, 'APPROVED', 'ACTIVE', gen_random_uuid(), $13, $13, $14::jsonb
+      $1, $2, $3, $4, 1, $5, $6, $7, $8, $9, 'INTERNAL', 1, 'GRANT_SCOPE',
+      $10, 'text/plain', $11, 'APPROVED', 'ACTIVE', gen_random_uuid(), $12, $12, $13::jsonb
     )`, [
     submissionId,
     input.organizationId,
@@ -156,7 +153,6 @@ async function seedPublishedDocument(
     input.targetDepartmentId,
     input.ownerDepartmentId,
     input.title,
-    input.audienceRoleIds,
     contentUri,
     contentHash,
     input.readerSelectionId,
@@ -164,13 +160,13 @@ async function seedPublishedDocument(
   ]);
 
   await client.query(`
-    INSERT INTO published_knowledge_version (
-      published_version_id, submission_id, knowledge_base_id, published_by_membership_id,
-      title, version_no, content_uri, content_hash, index_status, published_at,
-      shared_draft_id, classification, responsible_department_id, audience_role_ids,
-      valid_from, reader_selection_id, management, author_membership_id
+    INSERT INTO published_version (
+      id, review_submission_id, knowledge_base_id, published_by_id,
+      title, version_no, file_uri, content_hash, index_status, published_at,
+      document_id, classification, owner_department_id,
+      valid_from, reader_policy_id, metadata, author_id
     ) VALUES (
-      $1, $2, $3, NULL, $5, 1, $6, $7, $8, $9, $10, 'INTERNAL', $11, $12::uuid[], $9, $13, $14::jsonb, $4
+      $1, $2, $3, NULL, $5, 1, $6, $7, $8, $9, $10, 'INTERNAL', $11, $9, $12, $13::jsonb, $4
     )`, [
     publishedVersionId,
     submissionId,
@@ -183,20 +179,18 @@ async function seedPublishedDocument(
     input.publishedAt,
     input.documentId,
     input.ownerDepartmentId,
-    input.audienceRoleIds,
     input.readerSelectionId,
     input.management ? JSON.stringify(input.management) : null,
   ]);
 
   await client.query(`
-    INSERT INTO knowledge_current_publication (
-      shared_draft_id, organization_id, published_version_id, audience_role_ids,
-      target_scope_type, target_department_id, valid_from, reader_selection_id
-    ) VALUES ($1, $2, $3, $4::uuid[], $5, $6, $7, $8)`, [
+    INSERT INTO current_publication (
+      document_id, organization_id, published_version_id,
+      target_scope, target_department_id, valid_from, reader_policy_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
     input.documentId,
     input.organizationId,
     publishedVersionId,
-    input.audienceRoleIds,
     input.targetScopeType,
     input.targetDepartmentId,
     input.publishedAt,
@@ -205,7 +199,7 @@ async function seedPublishedDocument(
 
   if (input.collectionId) {
     await client.query(`
-      INSERT INTO knowledge_collection_placement (shared_draft_id, organization_id, collection_id)
+      INSERT INTO handbook_placement (document_id, organization_id, handbook_id)
       VALUES ($1, $2, $3)`, [input.documentId, input.organizationId, input.collectionId]);
   }
 
@@ -233,7 +227,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
 
     await asSuperuser(async (client) => {
       await client.query(`
-        INSERT INTO organization (organization_id, name, slug)
+        INSERT INTO organization (id, name, slug)
         VALUES ($1, 'Graph Org A', $2), ($3, 'Graph Org B', $4)`,
       [ids.orgA, `graph-a-${ids.orgA}`, ids.orgB, `graph-b-${ids.orgB}`]);
 
@@ -248,7 +242,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       ];
       for (const [userId, fullName] of users) {
         await client.query(`
-          INSERT INTO user_account (user_id, email, full_name)
+          INSERT INTO account (id, email, full_name)
           VALUES ($1, $2, $3)`, [userId, `${userId}@example.test`, fullName]);
       }
 
@@ -263,7 +257,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       ];
       for (const [membershipId, orgId, userId, status] of memberships) {
         await client.query(`
-          INSERT INTO organization_membership (membership_id, organization_id, user_id, status)
+          INSERT INTO membership (id, organization_id, account_id, status)
           VALUES ($1, $2, $3, $4)`, [membershipId, orgId, userId, status]);
       }
 
@@ -274,10 +268,10 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         [ids.deptB, ids.deptBRole, ids.orgB, "OPS", "Ops B"],
       ];
       for (const [deptId, roleId, orgId, code, name] of departments) {
-        await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, $4)`,
+        await client.query(`INSERT INTO role (id, organization_id, code, name) VALUES ($1, $2, $3, $4)`,
           [roleId, orgId, `GRAPH_${code}_${roleId.replaceAll("-", "").toUpperCase()}`, name]);
         await client.query(`
-          INSERT INTO department (department_id, organization_id, code, name, default_role_id, status)
+          INSERT INTO department (id, organization_id, code, name, default_role_id, status)
           VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`, [deptId, orgId, code, name, roleId]);
       }
 
@@ -296,39 +290,28 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       }
 
       await client.query(`
-        INSERT INTO access_scope (access_scope_id, organization_id, scope_type)
+        INSERT INTO access_scope (id, organization_id, scope)
         VALUES ($1, $2, 'ORGANIZATION')`, [ids.scopeA, ids.orgA]);
       await client.query(`
         INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.adminM, ids.scopeA]);
+        SELECT $1, id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.adminM, ids.scopeA]);
       await client.query(`
         INSERT INTO reviewer_grant (
-          organization_id, reviewer_membership_id, granted_by_membership_id,
+          organization_id, reviewer_id, granted_by_id,
           scope, department_id, classifications, level
         ) VALUES ($1, $2, $3, 'DEPARTMENT', $4, ARRAY['INTERNAL'], 'STANDARD')`,
       [ids.orgA, ids.reviewerM, ids.adminM, ids.engineering]);
 
-      for (const [roleId, orgId] of [[ids.allMembersA, ids.orgA], [ids.allMembersB, ids.orgB]] as const) {
-        await client.query(`
-          INSERT INTO role (role_id, organization_id, code, name)
-          VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone in organization')`, [roleId, orgId]);
-        await client.query(`
-          INSERT INTO role_permission (role_id, permission_id)
-          SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`, [roleId]);
-        await client.query(`
-          INSERT INTO audience (audience_id, organization_id, kind, name, is_managed, legacy_role_id)
-          VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization', true, $1)`, [roleId, orgId]);
-      }
 
       await client.query(`
-        INSERT INTO knowledge_base (knowledge_base_id, organization_id, department_id, name, scope_type)
+        INSERT INTO knowledge_base (id, organization_id, department_id, name, scope)
         VALUES ($1, $4, NULL, 'Org A KB', 'ORGANIZATION'),
                ($2, $4, $5, 'Eng A KB', 'DEPARTMENT'),
                ($3, $6, NULL, 'Org B KB', 'ORGANIZATION')`,
       [ids.kbOrgA, ids.kbDeptEngA, ids.kbOrgB, ids.orgA, ids.engineering, ids.orgB]);
 
       await client.query(`
-        INSERT INTO reader_selection (selection_id, organization_id, reader_mode, department_id)
+        INSERT INTO reader_policy (id, organization_id, mode, department_id)
         VALUES ($1, $5, 'ORGANIZATION', NULL),
                ($2, $5, 'DEPARTMENT', $6),
                ($3, $5, 'SELECTED_MEMBERS', NULL),
@@ -336,12 +319,12 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       [ids.selOrgA, ids.selEngA, ids.selMembersA, ids.selOrgB, ids.orgA, ids.engineering, ids.orgB]);
 
       await client.query(`
-        INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+        INSERT INTO policy_reader (reader_policy_id, organization_id, membership_id, position)
         VALUES ($1, $2, $3, 1), ($1, $2, $4, 2)`,
       [ids.selMembersA, ids.orgA, ids.authorM, ids.engineerM]);
 
       await client.query(`
-        INSERT INTO knowledge_collection (collection_id, organization_id, name, description, status, allowed_types)
+        INSERT INTO handbook (id, organization_id, name, description, status, allowed_types)
         VALUES ($1, $4, 'Handbook', 'Company standards', 'ACTIVE', ARRAY['Policy & Standard', 'Guide']),
                ($2, $4, 'Expired Only Folder', 'Should never leak', 'ACTIVE', ARRAY['Policy & Standard']),
                ($3, $4, 'Legacy Unconfigured', 'Legacy null types', 'ACTIVE', NULL)`,
@@ -358,7 +341,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgA,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersA],
         readerSelectionId: ids.selOrgA,
         title: "Security & Access Policy",
         management: { type: "Policy & Standard", version: "2.0", expirationDate: "2099-12-31", changeNote: "" },
@@ -375,7 +357,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgA,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersA],
         readerSelectionId: ids.selOrgA,
         title: "Legacy Unindexed Runbook",
         management: null,
@@ -392,7 +373,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgA,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersA],
         readerSelectionId: ids.selMembersA,
         title: "Restricted Selected Members Procedure",
         management: { type: "Procedure", version: "1.0", expirationDate: null, changeNote: "" },
@@ -409,7 +389,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgA,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersA],
         readerSelectionId: ids.selOrgA,
         title: "Expired Legal Standard",
         management: { type: "Policy & Standard", version: "1.0", expirationDate: "2020-01-01", changeNote: "" },
@@ -426,7 +405,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgA,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersA],
         readerSelectionId: ids.selOrgA,
         title: "Renewed Operations Guide",
         management: { type: "Guide", version: "1.0", expirationDate: "2020-01-01", changeNote: "" },
@@ -435,12 +413,12 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         collectionId: null,
       });
       const renewedSubmission = await client.query<{ submission_id: string }>(
-        "SELECT submission_id FROM published_knowledge_version WHERE published_version_id = $1",
+        "SELECT review_submission_id AS submission_id FROM published_version WHERE id = $1",
         [renewedVersionId],
       );
       await client.query(`
-        INSERT INTO publication_validity_renewal (
-          published_version_id, organization_id, shared_draft_id, expiration_date, renewal_submission_id
+        INSERT INTO publication_renewal (
+          published_version_id, organization_id, document_id, valid_until, review_submission_id
         ) VALUES ($1, $2, $3, '2099-01-01', $4)`,
       [renewedVersionId, ids.orgA, ids.docRenewed, renewedSubmission.rows[0]!.submission_id]);
 
@@ -475,9 +453,9 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       for (const [index, row] of caseRows.entries()) {
         await client.query(`
           INSERT INTO maintenance_case (
-            organization_id, origin, reporter_membership_id, document_id, published_version_id,
-            content_hash, title, description, route_department_id, classification, author_membership_id,
-            assignee_membership_id, reporter_status, outcome, reporter_explanation, first_claimed_at, resolved_at
+            organization_id, origin, reporter_id, document_id, published_version_id,
+            content_hash, title, description, review_department_id, classification, author_id,
+            assignee_id, reporter_status, outcome, reporter_explanation, first_claimed_at, resolved_at
           ) VALUES (
             $1, 'REVIEWER_INTAKE', NULL, $2, $3, $4, $5, 'Fixture maintenance detail', $6, 'INTERNAL', $7,
             $8, $9, $10, $11, $12, $13
@@ -506,7 +484,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgB,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersB],
         readerSelectionId: ids.selOrgB,
         title: "Foreign Org Document",
         management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
@@ -541,43 +518,40 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
             await client.query("SET LOCAL session_replication_role = replica");
             const orgs = [ids.orgA, ids.orgB];
             await client.query("DELETE FROM audit_event WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM arden_notification WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM private_item_share WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query(`DELETE FROM draft_version WHERE draft_id IN (
-              SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id
+            await client.query("DELETE FROM notification WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM direct_share WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query(`DELETE FROM private_version WHERE document_id IN (
+              SELECT d.id AS draft_id FROM private_document d JOIN private_workspace w ON w.id = d.workspace_id
                WHERE w.membership_id = ANY($1::uuid[]))`, [membershipIds]);
-            await client.query(`DELETE FROM draft_document WHERE workspace_id IN (
-              SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))`, [membershipIds]);
+            await client.query(`DELETE FROM private_document WHERE workspace_id IN (
+              SELECT id AS workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))`, [membershipIds]);
             await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [membershipIds]);
-            await client.query("DELETE FROM document_relationship_idempotency WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM relationship_request_key WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM document_relationship WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM maintenance_case WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM knowledge_collection_placement WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM knowledge_collection WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM publication_validity_renewal WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM knowledge_index_generation WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query(`DELETE FROM published_knowledge_version WHERE submission_id IN (
-              SELECT submission_id FROM shared_submission WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
-            await client.query("DELETE FROM shared_submission WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM handbook_placement WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM handbook WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM publication_renewal WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM index_generation WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query(`DELETE FROM published_version WHERE review_submission_id IN (
+              SELECT id AS submission_id FROM review_submission WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
+            await client.query("DELETE FROM review_submission WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM knowledge_base WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query(`DELETE FROM shared_draft_version WHERE shared_draft_id IN (
-              SELECT shared_draft_id FROM shared_draft WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
-            await client.query("DELETE FROM shared_draft WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM selected_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM reader_selection WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM document_category WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query(`DELETE FROM working_version WHERE document_id IN (
+              SELECT id AS shared_draft_id FROM company_document WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
+            await client.query("DELETE FROM company_document WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM policy_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM reader_policy WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])", [membershipIds]);
             await client.query("DELETE FROM reviewer_grant WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [membershipIds]);
-            await client.query("DELETE FROM organization_membership WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM membership WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM department WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.allMembersA, ids.allMembersB]]);
             await client.query("DELETE FROM role WHERE organization_id = ANY($1::uuid[])", [orgs]);
             await client.query("DELETE FROM access_scope WHERE organization_id = ANY($1::uuid[])", [orgs]);
-            await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [userIds]);
-            await client.query("DELETE FROM organization WHERE organization_id = ANY($1::uuid[])", [orgs]);
+            await client.query("DELETE FROM account WHERE id = ANY($1::uuid[])", [userIds]);
+            await client.query("DELETE FROM organization WHERE id = ANY($1::uuid[])", [orgs]);
           });
           break;
         } catch (error) {
@@ -760,7 +734,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
     ]);
 
     // 2. Org Admin (not author of docOrgPolicy) can create a link between two readable published docs,
-    // proving shared_draft author-only RLS does not block Org Admin authority (re-derived in DB).
+    // proving company_document author-only RLS does not block Org Admin authority (re-derived in DB).
     const adminCreateKey = id();
     const adminCreated = await relationshipService.createRelationship(
       ids.admin,
@@ -794,7 +768,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
 
     // Append-only idempotency ledger blocks UPDATE and DELETE.
     await expect(asSuperuser((client) => client.query(
-      "UPDATE document_relationship_idempotency SET status_code = 200 WHERE idempotency_key = $1",
+      "UPDATE relationship_request_key SET http_status = 200 WHERE idempotency_key = $1",
       [adminCreateKey],
     ), false)).rejects.toMatchObject({ code: "55000" });
 
@@ -807,7 +781,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       );
       await client.query(`
         INSERT INTO document_relationship (
-          organization_id, source_document_id, target_document_id, relationship_type, created_by_membership_id
+          organization_id, source_document_id, target_document_id, type, created_by_id
         ) VALUES ($1, $2, $3, 'RELATED', $4)`,
       [ids.orgA, ids.docOrgPolicy, ids.docLegacyUncat, ids.authorM]);
     }, false)).rejects.toMatchObject({ code: "42501" });
@@ -899,7 +873,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         knowledgeBaseId: ids.kbOrgA,
         targetScopeType: "ORGANIZATION",
         targetDepartmentId: null,
-        audienceRoleIds: [ids.allMembersA],
         readerSelectionId: ids.selOrgA,
         title: "Temporary Ghost Target",
         management: { type: "Guide", version: "1.0", expirationDate: "2099-12-31", changeNote: "" },
@@ -922,9 +895,9 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
     await asSuperuser(async (client) => {
       await client.query("SET LOCAL session_replication_role = replica");
       await client.query(
-        `UPDATE published_knowledge_version
-            SET management = jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', '2020-01-01', 'changeNote', '')
-          WHERE published_version_id = $1`,
+        `UPDATE published_version
+            SET metadata = jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', '2020-01-01', 'changeNote', '')
+          WHERE id = $1`,
         [tempVersionId],
       );
     });
@@ -937,7 +910,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
         [ids.author, ids.orgA],
       );
       return (await client.query(
-        "SELECT 1 FROM document_relationship WHERE relationship_id = $1",
+        "SELECT 1 FROM document_relationship WHERE id = $1",
         [ghostEdge.edge.relationshipId],
       )).rowCount;
     }, false);
@@ -1011,7 +984,7 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
       outcome: string;
       details_json: Record<string, unknown>;
     }>(`
-      SELECT event_type, outcome, details_json
+      SELECT event_type, outcome, details AS details_json
         FROM audit_event
        WHERE organization_id = $1
          AND event_type IN ('DOCUMENT_RELATIONSHIP_CREATED', 'DOCUMENT_RELATIONSHIP_DELETED')
@@ -1048,7 +1021,6 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
           knowledgeBaseId: ids.kbOrgA,
           targetScopeType: "ORGANIZATION",
           targetDepartmentId: null,
-          audienceRoleIds: [ids.allMembersA],
           readerSelectionId: ids.selOrgA,
           title: `Bulk Policy ${i + 1}`,
           management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
@@ -1077,13 +1049,13 @@ describe.skipIf(!databaseUrl)("Knowledge Graph projection with real PostgreSQL (
     const eligibleCount = await asSuperuser(async (client) => {
       await client.query("SET LOCAL session_replication_role = replica");
       await client.query(`
-        INSERT INTO knowledge_index_generation (
-          organization_id, submission_id, shared_draft_id, snapshot_version_id, snapshot_content_hash,
-          status, manifest_json, completed_at
-        ) SELECT organization_id, submission_id, shared_draft_id, shared_draft_version_id, content_hash,
+        INSERT INTO index_generation (
+          organization_id, review_submission_id, document_id, snapshot_version_id, snapshot_content_hash,
+          status, manifest, completed_at
+        ) SELECT organization_id, id, document_id, working_version_id, content_hash,
                  'READY', '{"chunks":[]}'::jsonb, now()
-            FROM shared_submission
-           WHERE organization_id = $1 AND shared_draft_id = ANY($2::uuid[])`, [ids.orgA, bulkDocIds]);
+            FROM review_submission
+           WHERE organization_id = $1 AND document_id = ANY($2::uuid[])`, [ids.orgA, bulkDocIds]);
       await client.query("SET LOCAL ROLE arden_runtime");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)",
         [ids.outsider, ids.orgA]);

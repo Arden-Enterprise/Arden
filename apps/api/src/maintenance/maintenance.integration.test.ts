@@ -16,6 +16,7 @@ const otherOrg = "22222222-2222-4222-8222-222222222222";
 const department = "33333333-3333-4333-8333-333333333311";
 const documentId = "33333333-3333-4333-8333-333333333333";
 const versionId = "44444444-4444-4444-8444-444444444444";
+const readerSelectionId = "55555555-5555-4555-8555-555555555555";
 const reporter = { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", membershipId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
 const author = { userId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", membershipId: "ffffffff-ffff-4fff-8fff-ffffffffffff" };
 const reviewer = { userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", membershipId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
@@ -45,35 +46,34 @@ async function seed(target: Pool) {
     await client.query("BEGIN");
     await client.query("SET LOCAL session_replication_role = replica");
     await client.query("SET LOCAL search_path TO arden, public");
-    await client.query(`DELETE FROM maintenance_report_import WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM maintenance_notification_receipt WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM publication_report WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM maintenance_notification WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM maintenance_case_event WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM maintenance_idempotency WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM notification_outbox WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM notification WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM case_event WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM case_intake_key WHERE organization_id = $1`, [org]);
     await client.query(`DELETE FROM maintenance_case WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM knowledge_current_publication WHERE organization_id = ANY($1::uuid[])`, [[org, otherOrg]]);
-    await client.query(`DELETE FROM published_knowledge_version WHERE published_version_id = $1`, [versionId]);
-    await client.query(`DELETE FROM shared_submission WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM shared_draft_version WHERE shared_draft_id = $1`, [documentId]);
-    await client.query(`DELETE FROM shared_draft WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM current_publication WHERE organization_id = ANY($1::uuid[])`, [[org, otherOrg]]);
+    await client.query(`DELETE FROM published_version WHERE id = $1`, [versionId]);
+    await client.query(`DELETE FROM review_submission WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM working_version WHERE document_id = $1`, [documentId]);
+    await client.query(`DELETE FROM company_document WHERE organization_id = $1`, [org]);
+    await client.query(`DELETE FROM reader_policy WHERE id = $1`, [readerSelectionId]);
     await client.query(`DELETE FROM knowledge_base WHERE organization_id = $1`, [org]);
     await client.query(`DELETE FROM reviewer_grant WHERE organization_id = $1`, [org]);
     await client.query(`DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])`,
       [[reporter.membershipId, author.membershipId, reviewer.membershipId, rival.membershipId, admin.membershipId, next.membershipId, outsider.membershipId]]);
     await client.query(`DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])`, [[author.membershipId]]);
-    await client.query(`DELETE FROM role_permission WHERE role_id IN (SELECT role_id FROM role WHERE organization_id = $1)`, [org]);
+    await client.query(`DELETE FROM role_permission WHERE role_id IN (SELECT id AS role_id FROM role WHERE organization_id = $1)`, [org]);
     await client.query(`DELETE FROM role WHERE organization_id = $1`, [org]);
     await client.query(`DELETE FROM access_scope WHERE organization_id = ANY($1::uuid[])`, [[org, otherOrg]]);
-    await client.query(`DELETE FROM organization_membership WHERE organization_id = ANY($1::uuid[])`, [[org, otherOrg]]);
+    await client.query(`DELETE FROM membership WHERE organization_id = ANY($1::uuid[])`, [[org, otherOrg]]);
     await client.query(`DELETE FROM department WHERE organization_id = $1`, [org]);
-    await client.query(`DELETE FROM organization WHERE organization_id = ANY($1::uuid[])`, [[org, otherOrg]]);
-    await client.query(`DELETE FROM user_account WHERE user_id = ANY($1::uuid[])`,
+    await client.query(`DELETE FROM organization WHERE id = ANY($1::uuid[])`, [[org, otherOrg]]);
+    await client.query(`DELETE FROM account WHERE id = ANY($1::uuid[])`,
       [[reporter.userId, author.userId, reviewer.userId, rival.userId, admin.userId, next.userId, outsider.userId]]);
 
-    await client.query(`INSERT INTO organization (organization_id, name, slug) VALUES
+    await client.query(`INSERT INTO organization (id, name, slug) VALUES
       ($1, 'Flow 4 disposable', 'flow4-disposable'), ($2, 'Flow 4 other', 'flow4-other')`, [org, otherOrg]);
-    await client.query(`INSERT INTO user_account (user_id, email, full_name) VALUES
+    await client.query(`INSERT INTO account (id, email, full_name) VALUES
       ($1, 'flow4-reporter@example.test', 'Synthetic Reporter'),
       ($2, 'flow4-author@example.test', 'Synthetic Author'),
       ($3, 'flow4-reviewer@example.test', 'Synthetic Reviewer'),
@@ -82,61 +82,59 @@ async function seed(target: Pool) {
       ($6, 'flow4-next@example.test', 'Synthetic Next'),
       ($7, 'flow4-outsider@example.test', 'Synthetic Outsider')`,
     [reporter.userId, author.userId, reviewer.userId, rival.userId, admin.userId, next.userId, outsider.userId]);
-    await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id) VALUES
+    await client.query(`INSERT INTO membership (id, organization_id, account_id) VALUES
       ($1, $8, $9), ($2, $8, $10), ($3, $8, $11), ($4, $8, $12), ($5, $8, $13), ($6, $8, $14), ($7, $15, $16)`,
     [reporter.membershipId, author.membershipId, reviewer.membershipId, rival.membershipId, admin.membershipId, next.membershipId,
       outsider.membershipId, org, reporter.userId, author.userId, reviewer.userId, rival.userId, admin.userId, next.userId,
       otherOrg, outsider.userId]);
-    const audience = await client.query<{ role_id: string }>(`INSERT INTO role (organization_id, code, name, is_system)
-      VALUES ($1, 'ALL_MEMBERS', 'Everyone in organization', false) RETURNING role_id`, [org]);
-    const audienceRole = audience.rows[0]?.role_id;
-    if (!audienceRole) throw new Error("Audience role was not created");
-    await client.query(`INSERT INTO role_permission (role_id, permission_id)
-      SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW' AND status = 'ACTIVE'`, [audienceRole]);
+    await client.query(`INSERT INTO reader_policy (id, organization_id, mode)
+      VALUES ($1, $2, 'ORGANIZATION')`, [readerSelectionId, org]);
     const departmentRole = await client.query<{ role_id: string }>(`INSERT INTO role (organization_id, code, name, is_system)
-      VALUES ($1, 'DEPT_DEFAULT_FLOW4', 'Support Member', false) RETURNING role_id`, [org]);
-    await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
+      VALUES ($1, 'DEPT_DEFAULT_FLOW4', 'Support Member', false) RETURNING id AS role_id`, [org]);
+    await client.query(`INSERT INTO department (id, organization_id, code, name, default_role_id)
       VALUES ($1, $2, 'SUPPORT', 'Support', $3)`, [department, org, departmentRole.rows[0]?.role_id]);
     await client.query(`INSERT INTO department_membership (membership_id, department_id, is_primary, status)
       VALUES ($1, $2, true, 'ACTIVE')`, [author.membershipId, department]);
-    const scope = await client.query<{ access_scope_id: string }>(`INSERT INTO access_scope (organization_id, scope_type)
-      VALUES ($1, 'ORGANIZATION') RETURNING access_scope_id`, [org]);
+    const scope = await client.query<{ access_scope_id: string }>(`INSERT INTO access_scope (organization_id, scope)
+      VALUES ($1, 'ORGANIZATION') RETURNING id AS access_scope_id`, [org]);
     await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-      SELECT $1, role_id, $2 FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system`,
+      SELECT $1, id, $2 FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system`,
     [admin.membershipId, scope.rows[0]?.access_scope_id]);
-    await client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, granted_by_membership_id,
+    await client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_id, granted_by_id,
         classifications, scope)
       VALUES ($1, $2, $5, ARRAY['INTERNAL'], 'ORGANIZATION'),
              ($1, $3, $5, ARRAY['INTERNAL'], 'ORGANIZATION'),
              ($1, $4, $5, ARRAY['INTERNAL'], 'ORGANIZATION')`,
     [org, reviewer.membershipId, rival.membershipId, next.membershipId, admin.membershipId]);
-    await client.query(`INSERT INTO shared_draft (shared_draft_id, organization_id, author_membership_id, title,
-        classification, current_version_no, responsible_department_id, target_scope_type)
+    await client.query(`INSERT INTO company_document (id, organization_id, author_id, title,
+        classification, current_version_no, owner_department_id, target_scope)
       VALUES ($1, $2, $3, 'IT Support Guide', 'INTERNAL', 1, $4, 'ORGANIZATION')`,
     [documentId, org, author.membershipId, department]);
-    const draftVersion = await client.query<{ shared_draft_version_id: string }>(`INSERT INTO shared_draft_version
-        (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-      VALUES ($1, 3, 'arden-private-object://flow4-v3', 'text/plain', $2) RETURNING shared_draft_version_id`,
+    const draftVersion = await client.query<{ shared_draft_version_id: string }>(`INSERT INTO working_version
+        (document_id, version_no, file_uri, mime_type, content_hash)
+      VALUES ($1, 3, 'arden-private-object://flow4-v3', 'text/plain', $2) RETURNING id AS shared_draft_version_id`,
     [documentId, hash]);
-    const submission = await client.query<{ submission_id: string }>(`INSERT INTO shared_submission (
-        draft_version_id, shared_draft_version_id, submitted_by_membership_id, target_scope_type, status,
-        organization_id, shared_draft_id, snapshot_version_no, responsible_department_id, title, classification,
-        audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id,
-        publication_state, review_rule, request_type)
+    const submission = await client.query<{ submission_id: string }>(`INSERT INTO review_submission (
+        private_version_id, working_version_id, submitted_by_id, target_scope, status,
+        organization_id, document_id, snapshot_version_no, owner_department_id, title, classification,
+        policy_version, file_uri, mime_type, content_hash, submit_request_id,
+        publication_state, review_rule, request_type, proposed_reader_policy_id, approved_reader_policy_id)
       VALUES (NULL, $1, $2, 'ORGANIZATION', 'APPROVED', $3, $4, 3, $5, 'IT Support Guide', 'INTERNAL',
-        $6::uuid[], 1, 'arden-private-object://flow4-v3', 'text/plain', $7, $8, 'ACTIVE', 'GRANT_SCOPE', 'CONTENT')
-      RETURNING submission_id`,
-    [draftVersion.rows[0]?.shared_draft_version_id, author.membershipId, org, documentId, department, [audienceRole], hash, randomUUID()]);
+        1, 'arden-private-object://flow4-v3', 'text/plain', $6, $7, 'ACTIVE', 'GRANT_SCOPE', 'CONTENT', $8, $8)
+      RETURNING id AS submission_id`,
+    [draftVersion.rows[0]?.shared_draft_version_id, author.membershipId, org, documentId, department, hash, randomUUID(),
+      readerSelectionId]);
     const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
-        (organization_id, name, scope_type) VALUES ($1, 'Flow 4 guide', 'ORGANIZATION') RETURNING knowledge_base_id`, [org]);
-    await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
-        title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
-        audience_role_ids, valid_from, author_membership_id)
-      VALUES ($1, $2, $3, 'IT Support Guide', 3, 'arden-private-object://flow4-v3', $4, $5, 'INTERNAL', $6, $7::uuid[], now(), $8)`,
-    [versionId, submission.rows[0]?.submission_id, knowledgeBase.rows[0]?.knowledge_base_id, hash, documentId, department, [audienceRole], author.membershipId]);
-    await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
-        audience_role_ids, target_scope_type, valid_from)
-      VALUES ($1, $2, $3, $4::uuid[], 'ORGANIZATION', now())`, [documentId, org, versionId, [audienceRole]]);
+        (organization_id, name, scope) VALUES ($1, 'Flow 4 guide', 'ORGANIZATION') RETURNING id AS knowledge_base_id`, [org]);
+    await client.query(`INSERT INTO published_version (id, review_submission_id, knowledge_base_id,
+        title, version_no, file_uri, content_hash, document_id, classification, owner_department_id,
+        valid_from, author_id, reader_policy_id)
+      VALUES ($1, $2, $3, 'IT Support Guide', 3, 'arden-private-object://flow4-v3', $4, $5, 'INTERNAL', $6, now(), $7, $8)`,
+    [versionId, submission.rows[0]?.submission_id, knowledgeBase.rows[0]?.knowledge_base_id, hash, documentId, department,
+      author.membershipId, readerSelectionId]);
+    await client.query(`INSERT INTO current_publication (document_id, organization_id, published_version_id,
+        target_scope, valid_from, reader_policy_id)
+      VALUES ($1, $2, $3, 'ORGANIZATION', now(), $4)`, [documentId, org, versionId, readerSelectionId]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -183,13 +181,24 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
     await adminPool?.end();
   });
 
-  it("pages Closed reports across tied timestamps without exposing another actor’s history", async () => {
-    await adminPool!.query(`INSERT INTO arden.publication_report
-      (report_id, organization_id, shared_draft_id, published_version_id, reporter_membership_id,
-       message, status, created_at, closed_at, closed_by_membership_id, resolution)
-      SELECT gen_random_uuid(), $1, $2, $3, $4, 'Closed ' || n, 'CLOSED',
-             '2026-01-01 UTC', '2026-01-02 UTC', $5, 'DISMISSED'
-        FROM generate_series(1, 205) n`, [org, documentId, versionId, reporter.membershipId, admin.membershipId]);
+  it("pages migrated Closed reports across tied timestamps without exposing another member's history", async () => {
+    await adminPool!.query(`WITH cases AS (
+      INSERT INTO arden.maintenance_case (organization_id, origin, reporter_id, document_id,
+        published_version_id, content_hash, title, description, review_department_id, classification, author_id,
+        assignee_id, reporter_status, outcome, reporter_explanation, first_claimed_at, created_at, resolved_at)
+      SELECT $1, 'READER_REPORT', $4, $2, $3, $6, 'IT Support Guide', 'Closed ' || n, $7, 'INTERNAL', $8,
+        $5, 'Resolved', 'NO_CHANGE_NEEDED', 'Historical disposition.', '2026-01-02 UTC', '2026-01-01 UTC', '2026-01-02 UTC'
+        FROM generate_series(1, 205) n RETURNING id AS case_id
+    ), imports AS (
+      INSERT INTO arden.case_event (organization_id, case_id, sequence, actor_id,
+        event_type, visibility, message, occurred_at, source_report_id)
+      SELECT $1, case_id, 1, $4, 'IMPORTED', 'PUBLIC', 'Imported from an existing report.', '2026-01-01 UTC', case_id
+        FROM cases
+    )
+    INSERT INTO arden.case_event (id, organization_id, case_id, sequence,
+      actor_id, event_type, visibility, message, occurred_at)
+    SELECT case_id, $1, case_id, 2, $5, 'RESOLVED', 'PUBLIC', 'The historical report was dismissed.', '2026-01-02 UTC'
+      FROM cases`, [org, documentId, versionId, reporter.membershipId, admin.membershipId, hash, department, author.membershipId]);
     const repository = new ArdenRepository(pool!);
     const first = await repository.listClosedPublicationReports(admin.userId, org, null);
     expect(first?.items).toHaveLength(200);
@@ -205,20 +214,13 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
       .resolves.toEqual({ items: [], nextCursor: null });
   });
 
-  it("keeps one open report for legacy clients before, during, and after cutover", async () => {
-    const reportId = randomUUID();
+  it("keeps one open case for the legacy endpoint after migration", async () => {
     const message = "The legacy guidance needs a check.";
-    await adminPool!.query(`INSERT INTO arden.publication_report
-      (report_id, organization_id, shared_draft_id, published_version_id, reporter_membership_id, message)
-      VALUES ($1, $2, $3, $4, $5, $6)`, [reportId, org, documentId, versionId, next.membershipId, message]);
     const submit = (text: string) => service.acceptLegacyReport(next.userId, org,
       { documentId, publishedVersionId: versionId, message: text });
+    const existing = await submit(message);
     await expect(submit(message)).rejects.toMatchObject({ code: "CONFLICT" });
-
-    const imports = await service.importOpenReports(admin.userId, org);
-    const importedId = imports.imported.find((item) => item.reportId === reportId)?.caseId;
-    if (!importedId) throw new Error("expected the staging report to be imported");
-    await expect(submit(message)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.importOpenReports(admin.userId, org)).resolves.toEqual({ imported: [], retained: [], held: [] });
 
     const close = async (caseId: string) => {
       const claimed = await service.claimCase(reviewer.userId, org, caseId, 1, randomUUID());
@@ -226,7 +228,7 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
       return service.decideNoChange(reviewer.userId, org, caseId, claimed.revision,
         "The guidance is still correct.", "Checked the exact version.", randomUUID());
     };
-    await close(importedId);
+    await close(existing.caseId);
 
     const concurrent = await Promise.allSettled([submit(message), submit("Another wording for the same document.")]);
     expect(concurrent.filter((item) => item.status === "fulfilled")).toHaveLength(1);
@@ -248,14 +250,15 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
     const replay = await service.createCase(reporter.userId, org, input, reportKey);
     expect(replay).toMatchObject({ caseId: created.caseId, kind: "reporter" });
     const notices = await adminPool!.query<{ recipient: string }>(`
-      SELECT recipient_membership_id AS recipient FROM arden.maintenance_notification
-       WHERE case_id = $1 AND logical_key = $2`, [created.caseId, `submitted:${created.caseId}`]);
+      SELECT recipient_id AS recipient FROM arden.notification
+       WHERE resource_id = $1 AND event_type = 'MAINTENANCE_CASE_UPDATED' AND event_key = $2`,
+    [created.caseId, `maintenance:submitted:${created.caseId}`]);
     expect(notices.rows.map(({ recipient }) => recipient).sort())
       .toEqual([reviewer.membershipId, rival.membershipId, next.membershipId].sort());
     await expect(service.listCases(reviewer.userId, org, "queue"))
       .resolves.toContainEqual(expect.objectContaining({ caseId: created.caseId, unread: true }));
     const before = await adminPool!.query<{ cases: string; events: string }>(`
-      SELECT count(*)::text AS cases, (SELECT count(*) FROM arden.maintenance_case_event WHERE organization_id = $1)::text AS events
+      SELECT count(*)::text AS cases, (SELECT count(*) FROM arden.case_event WHERE organization_id = $1)::text AS events
         FROM arden.maintenance_case WHERE organization_id = $1`, [org]);
 
     await expect(service.createCase(outsider.userId, otherOrg, input, randomUUID())).rejects.toMatchObject({ code: "DENIED" });
@@ -273,7 +276,7 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
     expect([reviewer.membershipId, rival.membershipId]).toContain(winner.kind === "assigned" ? winner.assigneeMembershipId : "");
     expect(lost.reason).toMatchObject({ code: expect.stringMatching(/^(CONFLICT|STALE)$/) });
     const afterRace = await adminPool!.query<{ cases: string; events: string }>(`
-      SELECT count(*)::text AS cases, (SELECT count(*) FROM arden.maintenance_case_event WHERE organization_id = $1)::text AS events
+      SELECT count(*)::text AS cases, (SELECT count(*) FROM arden.case_event WHERE organization_id = $1)::text AS events
         FROM arden.maintenance_case WHERE organization_id = $1`, [org]);
     expect(afterRace.rows[0]?.cases).toBe(before.rows[0]?.cases);
     expect(Number(afterRace.rows[0]?.events)).toBeGreaterThan(Number(before.rows[0]?.events));
@@ -299,7 +302,7 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
     const firstPage = await service.listHistory(next.userId, org, created.caseId, null);
     expect(firstPage.items.length).toBeGreaterThan(0);
 
-    await adminPool!.query(`DELETE FROM arden.knowledge_current_publication WHERE shared_draft_id = $1`, [documentId]);
+    await adminPool!.query(`DELETE FROM arden.current_publication WHERE document_id = $1`, [documentId]);
     const hidden = await service.getCase(reporter.userId, org, created.caseId);
     expect(hidden).toEqual({ kind: "minimal", caseId: created.caseId, reporterStatus: "Resolved", unread: false });
     await expect(service.listHistory(reporter.userId, org, created.caseId, null)).resolves.toEqual({ items: [], nextCursor: null });

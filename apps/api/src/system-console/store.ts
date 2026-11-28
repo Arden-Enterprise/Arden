@@ -35,7 +35,7 @@ export class PgSystemConsoleStore implements SystemConsoleStore {
       async (client) => {
         const active = await client.query(
           `SELECT 1 FROM arden_system.admin_session
-            WHERE session_id = $1 AND admin_id = $2 AND revoked_at IS NULL AND expires_at > now()`,
+            WHERE id = $1 AND admin_id = $2 AND revoked_at IS NULL AND expires_at > now()`,
           [actor.sessionId, actor.adminId],
         );
         if (!active.rowCount) return null;

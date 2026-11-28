@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository, ReviewerGrantConflictError } from "./repository.js";
-import { prepareKnowledgeFixture, seedLegacyGroupAudience, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
 import { registerKnowledgeCatalogVerification } from "../knowledge/catalog.integration.verification.js";
 import { registerGovernedAnsweringVerification } from "../answers/governed.integration.verification.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
@@ -24,8 +23,6 @@ const ids = {
   managerMembership: randomUUID(),
   organizationReviewerMembership: randomUUID(),
   department: randomUUID(),
-  organizationAudience: randomUUID(),
-  readerAudience: randomUUID(),
   secondDepartment: randomUUID(),
   secondDepartmentRole: randomUUID(),
 };
@@ -79,63 +76,33 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL search_path TO arden, public");
-      await client.query(`INSERT INTO organization (organization_id, name, slug) VALUES ($1, 'Arden Integration Test', $2)`, [ids.organization, `arden-test-${ids.organization}`]);
-      await client.query(`INSERT INTO user_account (user_id, email, full_name)
+      await client.query(`INSERT INTO organization (id, name, slug) VALUES ($1, 'Arden Integration Test', $2)`, [ids.organization, `arden-test-${ids.organization}`]);
+      await client.query(`INSERT INTO account (id, email, full_name)
         VALUES ($1, $2, 'Synthetic Owner'), ($3, $4, 'Synthetic Manager'),
           ($5, $6, 'Synthetic Organization Reviewer')`,
       [ids.owner, `${ids.owner}@example.test`, ids.manager, `${ids.manager}@example.test`,
         ids.organizationReviewer, `${ids.organizationReviewer}@example.test`]);
-      await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id)
+      await client.query(`INSERT INTO membership (id, organization_id, account_id)
         VALUES ($1, $2, $3), ($4, $2, $5), ($6, $2, $7)`,
       [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager,
         ids.organizationReviewerMembership, ids.organizationReviewer]);
       // The custom member role has "Administrator" in its display name, but is not the protected ORG_ADMIN capability.
-      await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Department Administrator')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
-      await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
+      await client.query(`INSERT INTO role (id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Department Administrator')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
+      await client.query(`INSERT INTO department (id, organization_id, code, name, default_role_id)
         VALUES ($1, $2, 'TEST', 'Synthetic department', $3)`, [ids.department, ids.organization, ids.ownerRole]);
       await client.query(`INSERT INTO department_membership
         (membership_id, department_id, is_primary)
         VALUES ($1, $2, true), ($3, $2, true)`,
       [ids.ownerMembership, ids.department, ids.managerMembership]);
-      // Managed audiences also need the bounded legacy role projection until schema contraction.
-      await client.query(`INSERT INTO role (role_id, organization_id, code, name)
-        VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone in organization')`,
-      [ids.organizationAudience, ids.organization]);
-      await client.query(`INSERT INTO audience
-        (audience_id, organization_id, kind, name, department_id, is_managed, legacy_role_id)
-        VALUES ($1, $2, 'DEPARTMENT_ALL', 'Synthetic department', $3, true, $1)`,
-      [ids.ownerRole, ids.organization, ids.department]);
-      await client.query(`INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`,
-      [ids.organizationAudience]);
-      await client.query(`INSERT INTO audience
-        (audience_id, organization_id, kind, name, is_managed, legacy_role_id)
-        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization', true, $1)`,
-      [ids.organizationAudience, ids.organization]);
-      await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
+      await client.query(`INSERT INTO access_scope (id, organization_id, scope) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.ownerMembership, ids.organizationScope]);
+        SELECT $1, id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.ownerMembership, ids.organizationScope]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission
+        SELECT $1, id FROM permission
          WHERE code IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE', 'PUBLISHED_CONTENT_VIEW')`, [ids.ownerRole]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission WHERE code = 'PRIVATE_WORKSPACE_READ'`, [ids.managerRole]);
-      // Canonical audience with the bounded role projection required by legacy snapshot FKs.
-      // A post-0017 fixture cannot rely on the migration's one-time role backfill.
-      await client.query(`INSERT INTO role(role_id, organization_id, code, name)
-        VALUES ($1, $2, $3, 'Synthetic readers')`,
-      [ids.readerAudience, ids.organization, `AUDIENCE_${ids.readerAudience.replaceAll("-", "").toUpperCase()}`]);
-      await client.query(`INSERT INTO role_permission(role_id, permission_id)
-        SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`, [ids.readerAudience]);
-      await client.query(`INSERT INTO audience(audience_id, organization_id, kind, name, is_managed,
-        created_by_membership_id, legacy_role_id) VALUES ($1, $2, 'GROUP', 'Synthetic readers', false, $3, $1)`,
-      [ids.readerAudience, ids.organization, ids.ownerMembership]);
-      await client.query(`INSERT INTO audience_group_membership(audience_id, organization_id, membership_id,
-        assigned_by_membership_id) VALUES ($1, $2, $3, $3)`,
-      [ids.readerAudience, ids.organization, ids.ownerMembership]);
-      await client.query(`INSERT INTO role_assignment(membership_id, role_id, access_scope_id) VALUES ($1, $2, $3)`,
-        [ids.ownerMembership, ids.readerAudience, ids.organizationScope]);
+        SELECT $1, id FROM permission WHERE code = 'PRIVATE_WORKSPACE_READ'`, [ids.managerRole]);
       // Identifiers/password are generated UUIDs, never caller input. This role
       // belongs only to this already verified disposable test target.
       await client.query(`CREATE ROLE ${indexLogin} LOGIN PASSWORD '${indexPassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
@@ -173,62 +140,58 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("BEGIN");
           await client.query("SET LOCAL search_path TO arden, public");
           await client.query("ALTER TABLE audit_event DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE draft_version DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE shared_draft_version DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE shared_submission DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE private_version DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE working_version DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE review_submission DISABLE TRIGGER USER");
           await client.query("ALTER TABLE review_decision DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE published_knowledge_version DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE knowledge_current_publication DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE reader_selection DISABLE TRIGGER USER");
-          await client.query("ALTER TABLE selected_reader DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE published_version DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE current_publication DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE reader_policy DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE policy_reader DISABLE TRIGGER USER");
           await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM knowledge_collection_document WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM knowledge_collection WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
-          await client.query(`DELETE FROM published_knowledge_version
-            WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
-          await client.query(`DELETE FROM knowledge_index_job WHERE generation_id IN
-            (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)`, [ids.organization]);
-          await client.query("DELETE FROM knowledge_index_generation WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM handbook WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM current_publication WHERE organization_id = $1", [ids.organization]);
+          await client.query(`DELETE FROM published_version
+            WHERE review_submission_id IN (SELECT id AS submission_id FROM review_submission WHERE organization_id = $1)`, [ids.organization]);
+          await client.query("DELETE FROM index_generation WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM review_decision
-            WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
-          await client.query("DELETE FROM shared_submission WHERE organization_id = $1", [ids.organization]);
+            WHERE review_submission_id IN (SELECT id AS submission_id FROM review_submission WHERE organization_id = $1)`, [ids.organization]);
+          await client.query("DELETE FROM review_submission WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_base WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM selected_reader WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM private_item_share WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM organization_direct_share_setting WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM private_collection WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM working_version WHERE document_id IN (SELECT id AS shared_draft_id FROM company_document WHERE author_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM company_document WHERE author_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM policy_reader WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM reader_policy WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM direct_share WHERE organization_id = $1", [ids.organization]);
+          await client.query(`UPDATE organization SET direct_share_enabled = true, direct_share_recipient_limit = 10,
+            direct_share_updated_by_id = NULL, direct_share_updated_at = NULL WHERE id = $1`, [ids.organization]);
+          await client.query("DELETE FROM private_version WHERE document_id IN (SELECT d.id AS draft_id FROM private_document d JOIN private_workspace w ON w.id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM private_document WHERE workspace_id IN (SELECT id AS workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM private_folder WHERE workspace_id IN (SELECT id AS workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM audience_group_membership WHERE organization_id = $1", [ids.organization]);
-          await client.query("DELETE FROM audience WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])",
             [[ids.ownerMembership, ids.managerMembership, ...readerFixtures.map((reader) => reader.membershipId)]]);
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience, ids.organizationAudience, ids.secondDepartmentRole]]);
-          await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership, ids.organizationReviewerMembership, ...readerFixtures.map((reader) => reader.membershipId)]]);
-          await client.query("DELETE FROM department WHERE department_id = ANY($1::uuid[])", [[ids.department, ids.secondDepartment]]);
-          await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience, ids.organizationAudience, ids.secondDepartmentRole]]);
-          await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
-          await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])",
+          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.secondDepartmentRole]]);
+          await client.query("DELETE FROM membership WHERE id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership, ids.organizationReviewerMembership, ...readerFixtures.map((reader) => reader.membershipId)]]);
+          await client.query("DELETE FROM department WHERE id = ANY($1::uuid[])", [[ids.department, ids.secondDepartment]]);
+          await client.query("DELETE FROM role WHERE id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.secondDepartmentRole]]);
+          await client.query("DELETE FROM access_scope WHERE id = $1", [ids.organizationScope]);
+          await client.query("DELETE FROM account WHERE id = ANY($1::uuid[])",
             [[ids.owner, ids.manager, ids.organizationReviewer, ...readerFixtures.map((reader) => reader.userId)]]);
-          await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM organization WHERE id = $1", [ids.organization]);
           await client.query(`DROP ROLE ${indexLogin}`);
           await client.query(`DROP ROLE ${notificationLogin}`);
-          await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
-          await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
-          await client.query("ALTER TABLE shared_submission ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE private_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE working_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE review_submission ENABLE TRIGGER USER");
           await client.query("ALTER TABLE review_decision ENABLE TRIGGER USER");
-          await client.query("ALTER TABLE published_knowledge_version ENABLE TRIGGER USER");
-          await client.query("ALTER TABLE knowledge_current_publication ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE published_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE current_publication ENABLE TRIGGER USER");
           await client.query("ALTER TABLE audit_event ENABLE TRIGGER USER");
-          await client.query("ALTER TABLE reader_selection ENABLE TRIGGER USER");
-          await client.query("ALTER TABLE selected_reader ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE reader_policy ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE policy_reader ENABLE TRIGGER USER");
           await client.query("COMMIT");
         } catch (error) {
           await client.query("ROLLBACK");
@@ -246,7 +209,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (!indexPool) throw new Error("Worker fixture is unavailable");
     const identity = await indexPool.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user");
     expect(identity.rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
-    await expect(indexPool.query("SELECT * FROM arden.draft_document LIMIT 1")).rejects.toMatchObject({ code: "42501" });
+    await expect(indexPool.query("SELECT * FROM arden.private_document LIMIT 1")).rejects.toMatchObject({ code: "42501" });
     await expect(new PgIndexGenerationStore(indexPool).claim(randomUUID(), 300)).resolves.toBeNull();
   });
 
@@ -255,26 +218,26 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const identity = await notificationPool.query<{ rolsuper: boolean; rolbypassrls: boolean }>(`
       SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`);
     expect(identity.rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
-    await expect(notificationPool.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0"))
+    await expect(notificationPool.query("SELECT 1 FROM arden.notification_outbox LIMIT 0"))
       .rejects.toMatchObject({ code: "42501" });
 
     const workerClient = await notificationPool.connect();
     try {
       await workerClient.query("BEGIN");
       await workerClient.query("SET LOCAL ROLE arden_notification_worker");
-      await expect(workerClient.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0")).resolves.toBeTruthy();
-      await expect(workerClient.query(`SELECT notification_id, organization_id, recipient_membership_id
-        FROM arden.arden_notification LIMIT 0`)).resolves.toBeTruthy();
+      await expect(workerClient.query("SELECT 1 FROM arden.notification_outbox LIMIT 0")).resolves.toBeTruthy();
+      await expect(workerClient.query(`SELECT id AS notification_id, organization_id, recipient_id AS recipient_membership_id
+        FROM arden.notification LIMIT 0`)).resolves.toBeTruthy();
       await workerClient.query("SAVEPOINT deny_share_metadata_read");
       await expect(workerClient.query(`SELECT publication_title, shared_by_name
-        FROM arden.arden_notification LIMIT 0`)).rejects.toMatchObject({ code: "42501" });
+        FROM arden.notification LIMIT 0`)).rejects.toMatchObject({ code: "42501" });
       await workerClient.query("ROLLBACK TO SAVEPOINT deny_share_metadata_read");
       await workerClient.query("SAVEPOINT deny_private_content_read");
-      await expect(workerClient.query("SELECT 1 FROM arden.shared_submission LIMIT 0"))
+      await expect(workerClient.query("SELECT 1 FROM arden.review_submission LIMIT 0"))
         .rejects.toMatchObject({ code: "42501" });
       await workerClient.query("ROLLBACK TO SAVEPOINT deny_private_content_read");
       await workerClient.query("SAVEPOINT deny_outbox_identity_update");
-      await expect(workerClient.query("UPDATE arden.arden_notification_outbox SET organization_id = $1 WHERE false",
+      await expect(workerClient.query("UPDATE arden.notification_outbox SET organization_id = $1 WHERE false",
         [ids.organization])).rejects.toMatchObject({ code: "42501" });
       await workerClient.query("ROLLBACK TO SAVEPOINT deny_outbox_identity_update");
     } finally {
@@ -286,7 +249,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL ROLE arden_runtime");
-      await expect(client.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0"))
+      await expect(client.query("SELECT 1 FROM arden.notification_outbox LIMIT 0"))
         .rejects.toMatchObject({ code: "42501" });
     } finally {
       await client.query("ROLLBACK");
@@ -401,8 +364,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query("SET LOCAL ROLE arden_runtime");
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.manager, ids.organization]);
-      const hidden = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM shared_draft WHERE shared_draft_id = $1", [created.draft.id]);
-      const hiddenVersion = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM shared_draft_version WHERE shared_draft_id = $1", [created.draft.id]);
+      const hidden = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM company_document WHERE id = $1", [created.draft.id]);
+      const hiddenVersion = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM working_version WHERE document_id = $1", [created.draft.id]);
       expect(hidden.rows[0]?.count).toBe("0");
       expect(hiddenVersion.rows[0]?.count).toBe("0");
     } finally {
@@ -442,12 +405,14 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     };
     await expect(repository.createReviewerGrant(ids.owner, ids.organization, grantInput,
       "integration-duplicate-grant")).rejects.toBeInstanceOf(ReviewerGrantConflictError);
-    const tagged = { ...grantInput, teamTag: "operations" };
+    await expect(repository.createReviewerGrant(ids.owner, ids.organization,
+      { ...grantInput, teamTag: "operations" }, "integration-retired-tag")).resolves.toBeNull();
+    const confidentialGrant = { ...grantInput, classifications: ["CONFIDENTIAL" as const] };
     const concurrent = await Promise.allSettled([
-      repository.createReviewerGrant(ids.owner, ids.organization, tagged, "integration-tagged-grant-a"),
-      repository.createReviewerGrant(ids.owner, ids.organization, tagged, "integration-tagged-grant-b"),
+      repository.createReviewerGrant(ids.owner, ids.organization, confidentialGrant, "integration-confidential-a"),
+      repository.createReviewerGrant(ids.owner, ids.organization, confidentialGrant, "integration-confidential-b"),
     ]);
-    expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === "fulfilled" && result.value !== null)).toHaveLength(1);
     expect(concurrent.filter((result) => result.status === "rejected" && result.reason instanceof ReviewerGrantConflictError)).toHaveLength(1);
 
     const client = await pool.connect();
@@ -456,12 +421,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query("SET LOCAL ROLE arden_runtime");
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.manager, ids.organization]);
-      const memberView = await client.query<{ user_id: string }>("SELECT user_id FROM user_account WHERE user_id = $1", [ids.owner]);
+      const memberView = await client.query<{ user_id: string }>("SELECT id AS user_id FROM account WHERE id = $1", [ids.owner]);
       expect(memberView.rows).toHaveLength(0);
 
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true), set_config('arden.org_admin', 'true', true)",
         [ids.owner, randomUUID()]);
-      const otherOrgView = await client.query<{ user_id: string }>("SELECT user_id FROM user_account WHERE user_id = $1", [ids.manager]);
+      const otherOrgView = await client.query<{ user_id: string }>("SELECT id AS user_id FROM account WHERE id = $1", [ids.manager]);
       expect(otherOrgView.rows).toHaveLength(0);
     } finally {
       await client.query("ROLLBACK");
@@ -499,8 +464,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(canReview(ids.organizationReviewer)).resolves.toBe(true);
     if (!pool || !notificationPool || !repository.notifications) throw new Error("Notification store or worker is unavailable");
     const grantNotification = await pool.query<{ notification_id: string; event_type: string }>(`
-      SELECT notification_id, event_type FROM arden.arden_notification
-      WHERE organization_id = $1 AND recipient_membership_id = $2 AND resource_id = $3
+      SELECT id AS notification_id, event_type FROM arden.notification
+      WHERE organization_id = $1 AND recipient_id = $2 AND resource_id = $3
         AND event_type = 'REVIEWER_GRANT_CREATED'`, [ids.organization, ids.organizationReviewerMembership, grant.id]);
     expect(grantNotification.rows).toHaveLength(1);
 
@@ -512,10 +477,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await rollbackClient.query(`SELECT set_config('arden.actor_id', $1, true),
         set_config('arden.organization_id', $2, true), set_config('arden.org_admin', 'true', true)`,
       [ids.owner, ids.organization]);
-      await rollbackClient.query("UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = $1", [grant.id]);
+      await rollbackClient.query("UPDATE reviewer_grant SET status = 'INACTIVE' WHERE id = $1", [grant.id]);
       await rollbackClient.query("RESET ROLE");
       const rolledBackEvent = await rollbackClient.query<{ count: string }>(`SELECT count(*)::text AS count
-        FROM arden.arden_notification WHERE recipient_membership_id = $1 AND resource_id = $2
+        FROM arden.notification WHERE recipient_id = $1 AND resource_id = $2
           AND event_type = 'REVIEWER_GRANT_REVOKED'`, [ids.organizationReviewerMembership, grant.id]);
       expect(rolledBackEvent.rows[0]?.count).toBe("1");
       await rollbackClient.query("ROLLBACK");
@@ -524,7 +489,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       rollbackClient.release();
     }
     const committedRevocations = await pool.query<{ count: string }>(`SELECT count(*)::text AS count
-      FROM arden.arden_notification WHERE recipient_membership_id = $1 AND resource_id = $2
+      FROM arden.notification WHERE recipient_id = $1 AND resource_id = $2
         AND event_type = 'REVIEWER_GRANT_REVOKED'`, [ids.organizationReviewerMembership, grant.id]);
     expect(committedRevocations.rows[0]?.count).toBe("0");
 
@@ -539,31 +504,31 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       deliveredIds.push(event.notificationId);
       if (deliveryAttempts++ === 0) throw new Error("REALTIME_HTTP_503");
     });
-    await pool.query(`UPDATE arden.arden_notification_outbox
+    await pool.query(`UPDATE arden.notification_outbox
       SET status = 'SENT', delivered_at = now()
       WHERE organization_id = $1 AND notification_id <> $2 AND status = 'PENDING'`,
     [ids.organization, targetNotificationId]);
-    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+    await pool.query(`UPDATE arden.notification_outbox SET available_at = '-infinity'::timestamptz
       WHERE notification_id = $1 AND status = 'PENDING'`, [targetNotificationId]);
     await expect(worker.runOnce()).resolves.toBe(true);
     const retrying = await pool.query<{ status: string; attempt_count: number; last_error_code: string }>(`
-      SELECT status, attempt_count, last_error_code FROM arden.arden_notification_outbox
+      SELECT status, attempt_count, last_error_code FROM arden.notification_outbox
        WHERE notification_id = $1`, [targetNotificationId]);
     expect(retrying.rows[0]).toMatchObject({ status: "PENDING", attempt_count: 1, last_error_code: "REALTIME_HTTP_503" });
-    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+    await pool.query(`UPDATE arden.notification_outbox SET available_at = '-infinity'::timestamptz
       WHERE notification_id = $1`, [targetNotificationId]);
     await expect(worker.runOnce()).resolves.toBe(true);
     const delivered = await pool.query<{ status: string; attempt_count: number }>(`
-      SELECT status, attempt_count FROM arden.arden_notification_outbox WHERE notification_id = $1`,
+      SELECT status, attempt_count FROM arden.notification_outbox WHERE notification_id = $1`,
     [targetNotificationId]);
     expect(delivered.rows[0]).toEqual({ status: "SENT", attempt_count: 2 });
     expect(deliveredIds).toEqual([targetNotificationId, targetNotificationId]);
 
-    await pool.query(`UPDATE arden.arden_notification_outbox
+    await pool.query(`UPDATE arden.notification_outbox
       SET status = 'PENDING', attempt_count = 7, available_at = now(), delivered_at = NULL,
-          lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL
+          lease_owner_id = NULL, lease_expires_at = NULL, last_error_code = NULL
       WHERE notification_id = $1`, [targetNotificationId]);
-    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+    await pool.query(`UPDATE arden.notification_outbox SET available_at = '-infinity'::timestamptz
       WHERE notification_id = $1`, [targetNotificationId]);
     const exhausted = new NotificationOutboxWorker(randomUUID(), notificationPool, {
       endpoint: "https://realtime.example.test/realtime/v1",
@@ -573,7 +538,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     });
     await expect(exhausted.runOnce()).resolves.toBe(true);
     const failed = await pool.query<{ status: string; attempt_count: number; last_error_code: string }>(`
-      SELECT status, attempt_count, last_error_code FROM arden.arden_notification_outbox
+      SELECT status, attempt_count, last_error_code FROM arden.notification_outbox
        WHERE notification_id = $1`, [targetNotificationId]);
     expect(failed.rows[0]).toEqual({ status: "FAILED", attempt_count: 8, last_error_code: "REALTIME_HTTP_503" });
 
@@ -592,7 +557,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.getKnowledgeOptions(ids.owner, ids.organization))
       .resolves.toMatchObject({ organizationReviewerAvailable: true });
 
-    const submit = async (title: string, audienceId: string) => {
+    const submit = async (title: string, targetReaders: TargetReadersInput) => {
       const created = await repository.createNewKnowledgeDraft(ids.owner, ids.organization, {
         actorMembershipId: ids.ownerMembership,
         title,
@@ -607,13 +572,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       });
       expect(created.kind).toBe("created");
       if (created.kind !== "created") throw new Error("Knowledge draft was not created");
-      await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
-      if (audienceId === ids.readerAudience) await seedLegacyGroupAudience(pool, ids.organization, created.draft.id, audienceId);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
         created.draft.id, created.draft.currentVersion, {
           responsibleDepartmentId: ids.department,
-          targetScopeType: "ORGANIZATION",
-          audienceRoleIds: [audienceId],
+          targetReaders,
+          management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
         }, null, `integration-${title}-configure`);
       expect(configured.kind).toBe("updated");
       if (configured.kind !== "updated") throw new Error("Knowledge draft was not configured");
@@ -625,8 +588,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       return submitted.submission;
     };
 
-    const limited = await submit("limited-scope", ids.readerAudience);
-    const organizationWide = await submit("organization-scope", ids.organizationAudience);
+    const limited = await submit("limited-scope", { mode: "DEPARTMENT", departmentId: ids.department });
+    const organizationWide = await submit("organization-scope", { mode: "ORGANIZATION" });
     const reviewResourceIds = await repository.notifications.listReviewRequestResourceIds(
       ids.organizationReviewer, ids.organization, false);
     expect(reviewResourceIds).not.toBeNull();
@@ -646,12 +609,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.decideReview(ids.organizationReviewer, ids.organization, limited.id,
       "REJECT", limited.snapshotVersionId, limited.contentHash, "Wrong reviewer scope",
       randomUUID(), "integration-organization-reviewer-limited-denied"))
-      .resolves.toEqual({ kind: "denied", reason: "NOT_AUTHORIZED" });
+      .resolves.toEqual({ kind: "not-found" });
     await expect(pool.query(
-      "SELECT status FROM arden.shared_submission WHERE submission_id = $1", [limited.id]))
+      "SELECT status FROM arden.review_submission WHERE id = $1", [limited.id]))
       .resolves.toMatchObject({ rows: [{ status: "PENDING_REVIEW" }] });
     await expect(pool.query(
-      "SELECT count(*)::text AS count FROM arden.review_decision WHERE submission_id = $1", [limited.id]))
+      "SELECT count(*)::text AS count FROM arden.review_decision WHERE review_submission_id = $1", [limited.id]))
       .resolves.toMatchObject({ rows: [{ count: "0" }] });
     await expect(repository.decideReview(ids.organizationReviewer, ids.organization,
       organizationWide.id, "REJECT", organizationWide.snapshotVersionId,
@@ -660,23 +623,23 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       .resolves.toMatchObject({ kind: "decided", submission: { status: "REJECTED" } });
 
     const newRules = await pool.query<{ submission_id: string; review_rule: string }>(`
-      SELECT submission_id, review_rule FROM arden.shared_submission
-       WHERE submission_id = ANY($1::uuid[]) ORDER BY submission_id`,
+      SELECT id AS submission_id, review_rule FROM arden.review_submission
+       WHERE id = ANY($1::uuid[]) ORDER BY submission_id`,
     [[limited.id, organizationWide.id]]);
     expect(newRules.rows).toEqual(expect.arrayContaining([
       { submission_id: limited.id, review_rule: "GRANT_SCOPE" },
       { submission_id: organizationWide.id, review_rule: "GRANT_SCOPE" },
     ]));
 
-    const legacy = await submit("legacy-organization-scope", ids.organizationAudience);
+    const legacy = await submit("legacy-organization-scope", { mode: "ORGANIZATION" });
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL search_path TO arden, public");
-      await client.query("ALTER TABLE shared_submission DISABLE TRIGGER trg_protect_flow2_submission_snapshot");
-      await client.query("UPDATE shared_submission SET review_rule = 'LEGACY' WHERE submission_id = $1",
+      await client.query("ALTER TABLE review_submission DISABLE TRIGGER trg_protect_flow2_submission_snapshot");
+      await client.query("UPDATE review_submission SET review_rule = 'LEGACY' WHERE id = $1",
         [legacy.id]);
-      await client.query("ALTER TABLE shared_submission ENABLE TRIGGER trg_protect_flow2_submission_snapshot");
+      await client.query("ALTER TABLE review_submission ENABLE TRIGGER trg_protect_flow2_submission_snapshot");
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -704,7 +667,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.listOwnedKnowledgeSubmissionIds(ids.manager, ids.organization, [legacy.id]))
       .resolves.toEqual([]);
     await expect(pool.query<{ review_rule: string }>(
-      "SELECT review_rule FROM arden.shared_submission WHERE submission_id = $1", [legacy.id]))
+      "SELECT review_rule FROM arden.review_submission WHERE id = $1", [legacy.id]))
       .resolves.toMatchObject({ rows: [{ review_rule: "LEGACY" }] });
   });
 
@@ -727,23 +690,17 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(created.kind).toBe("created");
     if (created.kind !== "created") return;
 
-    // Decision 0039: only a pre-existing legacy draft may still carry a GROUP audience.
     const attached = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
-      responsibleDepartmentId: ids.department, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.readerAudience],
-    }, null, "integration-flow2-new-group");
+      audienceRoleIds: [randomUUID()],
+    }, null, "integration-flow2-removed-audience");
     expect(attached.kind).toBe("invalid-metadata");
-    await seedLegacyGroupAudience(pool, ids.organization, created.draft.id, ids.readerAudience);
 
     const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
-      // Legacy audience/reviewer fixture, upgraded with explicit reader metadata.
-      responsibleDepartmentId: ids.department,
-      targetScopeType: "ORGANIZATION",
-      audienceRoleIds: [ids.readerAudience],
+      targetReaders: { mode: "SELECTED_MEMBERS", memberIds: [ids.ownerMembership, ids.organizationReviewerMembership] },
+      management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
     }, null, "integration-flow2-configure");
     expect(configured).toMatchObject({ kind: "updated", draft: { currentVersion: 2 } });
     if (configured.kind !== "updated") return;
-
-    await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
 
     const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, randomUUID(), "integration-flow2-submit");
@@ -833,8 +790,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const evidence = await pool.query<{ event_type: string; count: string }>(`
       SELECT a.event_type, count(*)::text AS count FROM arden.audit_event a
-      JOIN arden.review_decision rd ON rd.review_decision_id = a.review_decision_id
-       WHERE a.organization_id = $1 AND rd.submission_id = $2
+      JOIN arden.review_decision rd ON rd.id = a.review_decision_id
+       WHERE a.organization_id = $1 AND rd.review_submission_id = $2
          AND a.event_type IN ('KNOWLEDGE_REVIEW_DECIDED', 'KNOWLEDGE_INDEX_ACTIVATED')
        GROUP BY a.event_type ORDER BY a.event_type`, [ids.organization, submitted.submission.id]);
     expect(evidence.rows).toEqual([
@@ -862,7 +819,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (!failedJob) return;
     await expect(generationStore.fail(failedJob, workerId, "AI_SERVICE_UNAVAILABLE", true))
       .resolves.toBe("PENDING");
-    await pool.query("UPDATE arden.knowledge_index_job SET available_at = now() WHERE job_id = $1", [failedJob.jobId]);
+    await pool.query("UPDATE arden.index_generation SET available_at = now() WHERE job_id = $1", [failedJob.jobId]);
     const retry = await generationStore.claim(workerId, 90);
     expect(retry).toMatchObject({ jobId: failedJob.jobId, attemptCount: 2 });
     if (!retry) return;
@@ -948,21 +905,20 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     // Ten extra readers: r[0..4] in the fixture department, r[5..9] in a second department.
     await superuser(async (client) => {
-      await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Second department')`,
+      await client.query(`INSERT INTO role (id, organization_id, code, name) VALUES ($1, $2, $3, 'Second department')`,
         [ids.secondDepartmentRole, ids.organization, `ARDEN_TEST_SECOND_${ids.secondDepartmentRole.replaceAll("-", "").toUpperCase()}`]);
-      await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
+      await client.query(`INSERT INTO department (id, organization_id, code, name, default_role_id)
         VALUES ($1, $2, 'SECOND', 'Second department', $3)`, [ids.secondDepartment, ids.organization, ids.secondDepartmentRole]);
       for (const [index, reader] of readerFixtures.entries()) {
-        await client.query(`INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, $3)`,
+        await client.query(`INSERT INTO account (id, email, full_name) VALUES ($1, $2, $3)`,
           [reader.userId, `${reader.userId}@readers.example.test`, `Reader ${index + 1}`]);
-        await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3)`,
+        await client.query(`INSERT INTO membership (id, organization_id, account_id) VALUES ($1, $2, $3)`,
           [reader.membershipId, ids.organization, reader.userId]);
         await client.query(`INSERT INTO department_membership (membership_id, department_id, is_primary) VALUES ($1, $2, true)`,
           [reader.membershipId, index < 5 ? ids.department : ids.secondDepartment]);
       }
     });
     const readers = readerFixtures.map((reader) => reader.membershipId);
-    // Organization-wide audience: every member passes publication audience RLS, so Target Readers decide.
     expect(await repository.createReviewerGrant(ids.owner, ids.organization, {
       reviewerMembershipId: ids.organizationReviewerMembership, scope: "ORGANIZATION", departmentId: null,
       classifications: ["INTERNAL"], teamTag: null, projectTag: null, validUntil: null,
@@ -972,34 +928,33 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       classifications: ["INTERNAL"], level: "SENIOR", teamTag: null, projectTag: null, validUntil: null,
     }, "t21-department-grant")).not.toBeNull();
 
-    const submit = async (title: string, targetReaders: TargetReadersInput | null) => {
+    const submit = async (title: string, targetReaders: TargetReadersInput) => {
       const created = await repository.createNewKnowledgeDraft(ids.owner, ids.organization, {
         actorMembershipId: ids.ownerMembership, title, classification: "INTERNAL", idempotencyKey: randomUUID(),
         content: { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain",
           contentHash: randomUUID().replaceAll("-", "").padEnd(64, "0") }, requestId: `t21-${title}-create`,
       });
       if (created.kind !== "created") throw new Error("Draft was not created");
-      await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership], targetReaders !== null);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
-        responsibleDepartmentId: ids.department, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.organizationAudience],
-        ...(targetReaders ? { targetReaders } : {}),
+        targetReaders,
+        management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
       }, null, `t21-${title}-configure`);
       if (configured.kind !== "updated") throw new Error(`Draft was not configured: ${configured.kind}`);
-      const legacyId = targetReaders === null ? await submitLegacyKnowledgeFixture(pool, ids.organization, created.draft.id) : null;
-      const submitted = legacyId ? { kind: "submitted" as const, submission: (await repository.listKnowledgeSubmissions(ids.owner, ids.organization))!.find(item => item.id === legacyId)! }
-        : await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
-          randomUUID(), `t21-${title}-submit`);
+      const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
+        randomUUID(), `t21-${title}-submit`);
       if (submitted.kind !== "submitted") throw new Error("Draft was not submitted");
       const submission = submitted.submission;
       const requestRecipients = await pool.query<{ recipient_membership_id: string }>(`
-        SELECT recipient_membership_id FROM arden.arden_notification
+        SELECT recipient_id AS recipient_membership_id FROM arden.notification
          WHERE organization_id = $1 AND resource_id = $2 AND event_type = 'REVIEW_REQUESTED'`,
       [ids.organization, submission.id]);
-      expect(requestRecipients.rows.map(row => row.recipient_membership_id)).toContain(ids.organizationReviewerMembership);
-      const legacyDepartmentRequest = requestRecipients.rows.some(row => row.recipient_membership_id === ids.managerMembership);
-      expect(legacyDepartmentRequest).toBe(legacyId !== null);
+      const organizationWide = targetReaders.mode === "ORGANIZATION";
+      const recipients = requestRecipients.rows.map(row => row.recipient_membership_id);
+      expect(recipients).toContain(organizationWide ? ids.organizationReviewerMembership : ids.managerMembership);
+      expect(recipients).not.toContain(organizationWide ? ids.managerMembership : ids.organizationReviewerMembership);
+      const reviewer = organizationWide ? ids.organizationReviewer : ids.manager;
       const decide = (approvedReaders?: TargetReadersInput, key = randomUUID(), action: "APPROVE" | "REJECT" = "APPROVE") =>
-        repository.decideReview(ids.organizationReviewer, ids.organization, submission.id, action,
+        repository.decideReview(reviewer, ids.organization, submission.id, action,
           submission.snapshotVersionId, submission.contentHash, action === "REJECT" ? "Clarify" : null, key,
           `t21-${title}-decide`, approvedReaders);
       return { draftId: created.draft.id, submission, decide };
@@ -1008,15 +963,15 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       proposed_selection_id: string; approved_selection_id: string | null; status: string;
       proposed_mode: string; approved_mode: string | null; approved_department_id: string | null;
       decisions: string; audits: string }>(`
-      SELECT s.proposed_selection_id, s.approved_selection_id, s.status,
-             p.reader_mode AS proposed_mode, a.reader_mode AS approved_mode, a.department_id AS approved_department_id,
-             (SELECT count(*) FROM review_decision rd WHERE rd.submission_id = s.submission_id)::text AS decisions,
+      SELECT s.proposed_reader_policy_id AS proposed_selection_id, s.approved_reader_policy_id AS approved_selection_id, s.status,
+             p.mode AS proposed_mode, a.mode AS approved_mode, a.department_id AS approved_department_id,
+             (SELECT count(*) FROM review_decision rd WHERE rd.review_submission_id = s.id)::text AS decisions,
              (SELECT count(*) FROM audit_event ae WHERE ae.event_type = 'KNOWLEDGE_REVIEW_DECIDED'
-                AND ae.details_json->>'submissionId' = s.submission_id::text)::text AS audits
-        FROM shared_submission s
-        JOIN reader_selection p ON p.selection_id = s.proposed_selection_id
-        LEFT JOIN reader_selection a ON a.selection_id = s.approved_selection_id
-       WHERE s.submission_id = $1`, [submissionId]).then((result) => result.rows[0]!));
+                AND ae.details->>'submissionId' = s.id::text)::text AS audits
+        FROM review_submission s
+        JOIN reader_policy p ON p.id = s.proposed_reader_policy_id
+        LEFT JOIN reader_policy a ON a.id = s.approved_reader_policy_id
+       WHERE s.id = $1`, [submissionId]).then((result) => result.rows[0]!));
 
     // 1. Proposed Department → Organization is widening: nothing is recorded.
     const department = await submit("t21-department", { mode: "DEPARTMENT", departmentId: ids.department });
@@ -1029,7 +984,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     // 9. The authorized reviewer sees the proposed readers with names; a plain member does not get the review.
     const listed = await submit("t21-listed", { mode: "SELECTED_MEMBERS", memberIds: readers });
-    const detail = await repository.getAssignedReview(ids.organizationReviewer, ids.organization, listed.submission.id);
+    const detail = await repository.getAssignedReview(ids.manager, ids.organization, listed.submission.id);
     expect(detail?.proposedReaders).toEqual({ mode: "SELECTED_MEMBERS", department: null,
       members: readers.map((membershipId, index) => ({ membershipId, displayName: `Reader ${index + 1}` })) });
     await expect(repository.getAssignedReview(readerFixtures[0]!.userId, ids.organization, listed.submission.id)).resolves.toBeNull();
@@ -1054,8 +1009,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(listed.decide({ mode: "SELECTED_MEMBERS", memberIds: readers.slice(0, 4) }, narrowKey))
       .resolves.toEqual({ kind: "conflict" });
     const narrowedAudit = await superuser((client) => client.query<{ details_json: Record<string, unknown> }>(`
-      SELECT details_json FROM audit_event WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED'
-         AND details_json->>'submissionId' = $1`, [listed.submission.id]));
+      SELECT details AS details_json FROM audit_event WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED'
+         AND details->>'submissionId' = $1`, [listed.submission.id]));
     expect(narrowedAudit.rows[0]?.details_json).toMatchObject({ narrowed: true,
       proposedReaders: { mode: "SELECTED_MEMBERS", departmentId: null, memberCount: 10 },
       approvedReaders: { mode: "SELECTED_MEMBERS", departmentId: null, memberCount: 5 } });
@@ -1075,23 +1030,24 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const asProposedRows = await selections(asProposed.submission.id);
     expect(asProposedRows.approved_selection_id).not.toBe(asProposedRows.proposed_selection_id);
 
-    // 7. A legacy audience submission approves as before and refuses approved readers.
-    const legacy = await submit("t21-legacy", null);
-    await expect(legacy.decide({ mode: "ORGANIZATION" })).resolves.toEqual({ kind: "denied", reason: "READERS_NOT_SUPPORTED" });
-    await expect(legacy.decide()).resolves.toMatchObject({ kind: "decided",
-      submission: { status: "APPROVED", proposedTargetReaders: null, approvedTargetReaders: null } });
+    // A content submission cannot lose the reader policy when it is frozen.
+    await expect(sqlState(async (client) => {
+      await client.query("SET LOCAL session_replication_role = replica");
+      await client.query("UPDATE review_submission SET proposed_reader_policy_id = NULL WHERE id = $1",
+        [department.submission.id]);
+    })).resolves.toBe("23514");
 
     // 8. Referenced selections are immutable and approved readers are recorded once.
-    await expect(sqlState((client) => client.query(`UPDATE reader_selection SET revision = revision + 1
-      WHERE selection_id = $1`, [organizationRows.approved_selection_id]))).resolves.toBe("55000");
-    await expect(sqlState((client) => client.query(`UPDATE shared_submission SET approved_selection_id = proposed_selection_id
-      WHERE submission_id = $1`, [organization.submission.id]))).resolves.toBe("55000");
+    await expect(sqlState((client) => client.query(`UPDATE reader_policy SET revision = revision + 1
+      WHERE id = $1`, [organizationRows.approved_selection_id]))).resolves.toBe("55000");
+    await expect(sqlState((client) => client.query(`UPDATE review_submission SET approved_reader_policy_id = proposed_reader_policy_id
+      WHERE id = $1`, [organization.submission.id]))).resolves.toBe("55000");
 
     // REV-02: the reviewer's queue carries version and author; their decided submissions form the history.
-    const queue = await repository.listAssignedReviews(ids.organizationReviewer, ids.organization);
+    const queue = await repository.listAssignedReviews(ids.manager, ids.organization);
     expect(queue?.find((item) => item.submissionId === department.submission.id))
       .toMatchObject({ versionNo: 2, authorName: "Synthetic Owner" });
-    const history = await repository.listDecidedReviews(ids.organizationReviewer, ids.organization);
+    const history = await repository.listDecidedReviews(ids.manager, ids.organization);
     expect(history?.find((item) => item.submissionId === listed.submission.id))
       .toMatchObject({ decision: "APPROVED", versionNo: 2, authorName: "Synthetic Owner" });
     await expect(repository.listDecidedReviews(readerFixtures[0]!.userId, ids.organization)).resolves.toEqual([]);
@@ -1125,20 +1081,20 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       });
     }
     const publicationReaders = await superuser((client) => client.query<{ pv: string | null; cp: string | null }>(`
-      SELECT pv.reader_selection_id AS pv, cp.reader_selection_id AS cp
-        FROM published_knowledge_version pv JOIN knowledge_current_publication cp USING (published_version_id)
-       WHERE pv.submission_id = $1`, [listed.submission.id]));
+      SELECT pv.reader_policy_id AS pv, cp.reader_policy_id AS cp
+        FROM published_version pv JOIN current_publication cp ON pv.id = cp.published_version_id
+       WHERE pv.review_submission_id = $1`, [listed.submission.id]));
     const listedRows = await selections(listed.submission.id);
     expect(publicationReaders.rows).toEqual([{ pv: listedRows.approved_selection_id, cp: listedRows.approved_selection_id }]);
 
     const sharedPublication = await superuser((client) => client.query<{ id: string }>(`
-      SELECT pv.published_version_id AS id FROM published_knowledge_version pv
-      JOIN knowledge_current_publication cp USING (published_version_id)
-      WHERE pv.submission_id = $1`, [listed.submission.id]));
+      SELECT pv.id AS id FROM published_version pv
+      JOIN current_publication cp ON pv.id = cp.published_version_id
+      WHERE pv.review_submission_id = $1`, [listed.submission.id]));
     const sharedPublicationId = sharedPublication.rows[0]?.id;
     if (!sharedPublicationId) throw new Error("Expected the selected-reader publication to be current");
     const activationShareNotifications = await pool.query(`
-      SELECT notification_id FROM arden.arden_notification
+      SELECT id AS notification_id FROM arden.notification
        WHERE organization_id = $1 AND resource_type = 'PUBLICATION' AND resource_id = $2
          AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')`, [ids.organization, sharedPublicationId]);
     expect(activationShareNotifications.rows).toEqual([]);
@@ -1148,19 +1104,15 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       .resolves.toEqual([]);
 
     const departmentPublication = await superuser((client) => client.query<{ id: string }>(`
-      SELECT pv.published_version_id AS id FROM published_knowledge_version pv
-      JOIN knowledge_current_publication cp USING (published_version_id)
-      WHERE pv.submission_id = $1`, [organization.submission.id]));
-    const legacyPublication = await superuser((client) => client.query<{ id: string }>(`
-      SELECT pv.published_version_id AS id FROM published_knowledge_version pv
-      JOIN knowledge_current_publication cp USING (published_version_id)
-      WHERE pv.submission_id = $1`, [legacy.submission.id]));
+      SELECT pv.id AS id FROM published_version pv
+      JOIN current_publication cp ON pv.id = cp.published_version_id
+      WHERE pv.review_submission_id = $1`, [organization.submission.id]));
     const activationShareEvents = await pool.query(`
-      SELECT notification_id FROM arden.arden_notification
+      SELECT id AS notification_id FROM arden.notification
        WHERE organization_id = $1 AND resource_type = 'PUBLICATION'
          AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
          AND resource_id = ANY($2::uuid[])`, [ids.organization,
-      [sharedPublicationId, departmentPublication.rows[0]?.id, legacyPublication.rows[0]?.id]]);
+      [sharedPublicationId, departmentPublication.rows[0]?.id]]);
     expect(activationShareEvents.rows).toEqual([]);
 
     for (const [userId, readable] of [[readerFixtures[0]!.userId, true], [readerFixtures[5]!.userId, false],
@@ -1173,8 +1125,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       expect(visible.every((item) => canRead(actor, { organizationId: ids.organization, readers: item.targetReaders }))).toBe(true);
       expect(sources.some((source) => source.draftId === listed.draftId)).toBe(readable);
       const detailRead = await repository.getPublishedKnowledge(userId, ids.organization,
-        (await superuser((client) => client.query<{ id: string }>(`SELECT published_version_id AS id
-          FROM published_knowledge_version WHERE submission_id = $1`, [listed.submission.id]))).rows[0]!.id);
+        (await superuser((client) => client.query<{ id: string }>(`SELECT id AS id
+          FROM published_version WHERE review_submission_id = $1`, [listed.submission.id]))).rows[0]!.id);
       expect(detailRead !== null).toBe(readable);
     }
 
@@ -1232,12 +1184,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       }
     };
     await expect(runtime(ids.owner, (client) => client.query(
-      "UPDATE private_collection SET parent_collection_id = $2 WHERE collection_id = $1", [parent!.id, child!.id])))
+      "UPDATE private_folder SET parent_folder_id = $2 WHERE id = $1", [parent!.id, child!.id])))
       .rejects.toMatchObject({ code: "23514" });
     await expect(runtime(ids.manager, async (client) => (await client.query(
-      "SELECT 1 FROM private_collection WHERE collection_id = ANY($1::uuid[])", [[parent!.id, child!.id]])).rowCount)).resolves.toBe(0);
+      "SELECT 1 FROM private_folder WHERE id = ANY($1::uuid[])", [[parent!.id, child!.id]])).rowCount)).resolves.toBe(0);
     await expect(runtime(ids.manager, (client) => client.query(
-      "UPDATE private_collection SET parent_collection_id = $2 WHERE collection_id = $1", [managerCollection!.id, parent!.id])))
+      "UPDATE private_folder SET parent_folder_id = $2 WHERE id = $1", [managerCollection!.id, parent!.id])))
       .rejects.toMatchObject({ code: "23503" });
 
     // F03-ORG-AC3/AC4: favorites and duplicate.
@@ -1267,19 +1219,19 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const expired = await store.trashCollection(ids.owner, ids.organization, child!.id, "org-trash-expire");
     const beforeRetention = await repository.privateTrashRetention.purgeExpired(new Date(), 100);
     expect(beforeRetention.purgedBatches).toBe(0);
-    await pool.query(`UPDATE arden.draft_document SET trashed_at = trashed_at - interval '31 days' WHERE trash_batch_id = $1`, [expired!.batchId]);
-    await pool.query(`UPDATE arden.private_collection SET trashed_at = trashed_at - interval '31 days' WHERE trash_batch_id = $1`, [expired!.batchId]);
+    await pool.query(`UPDATE arden.private_document SET trashed_at = trashed_at - interval '31 days' WHERE trash_batch_id = $1`, [expired!.batchId]);
+    await pool.query(`UPDATE arden.private_folder SET trashed_at = trashed_at - interval '31 days' WHERE trash_batch_id = $1`, [expired!.batchId]);
     const purged = await repository.privateTrashRetention.purgeExpired(new Date(), 100);
     expect(purged.purgedBatches).toBe(1);
     expect(purged.content.map((item) => item.draftId)).toEqual(expect.arrayContaining([note!.id, duplicate!.id]));
     await repository.privateTrashRetention.markContentErased(purged.content.map((item) => item.draftId));
     const tombstones = await pool.query<{ status: string; title: string; content_purged_at: Date | null }>(`SELECT status, title, content_purged_at
-      FROM arden.draft_document WHERE draft_id = ANY($1::uuid[])`, [[note!.id, duplicate!.id]]);
+      FROM arden.private_document WHERE id = ANY($1::uuid[])`, [[note!.id, duplicate!.id]]);
     expect(tombstones.rows).toEqual([
       expect.objectContaining({ status: "PURGED", title: "", content_purged_at: expect.any(Date) }),
       expect.objectContaining({ status: "PURGED", title: "", content_purged_at: expect.any(Date) }),
     ]);
-    const versions = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.draft_version WHERE draft_id = $1`, [note!.id]);
+    const versions = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.private_version WHERE document_id = $1`, [note!.id]);
     expect(versions.rows[0]?.count).toBe("1");
     await expect(store.listTrash(ids.owner, ids.organization)).resolves.toEqual([expect.objectContaining({ kind: "collection", id: parent!.id })]);
     await expect(store.restoreTrash(ids.owner, ids.organization, expired!.batchId, "org-restore-purged")).resolves.toBeNull();
@@ -1294,7 +1246,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(store.purgeTrash(ids.manager, ids.organization, parentBatch, "org-purge-steal")).resolves.toBeNull();
     await expect(store.purgeTrash(ids.owner, ids.organization, parentBatch, "org-purge")).resolves.toEqual([]);
     await expect(store.listCollections(ids.owner, ids.organization)).resolves.toEqual([]);
-    const purgeAudit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+    const purgeAudit = await pool.query<{ details_json: unknown }>(`SELECT details AS details_json FROM arden.audit_event
       WHERE organization_id = $1 AND event_type = 'PRIVATE_ITEM_PURGED'`, [ids.organization]);
     expect(purgeAudit.rows.length).toBeGreaterThan(0);
     expect(JSON.stringify(purgeAudit.rows)).not.toMatch(/Owner parent|Owner child|Organized/);
@@ -1311,10 +1263,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const second = await make("Second");
     const third = await make("Third");
     const savedAt = async (id: string) => (await pool!.query<{ updated_at: Date }>(
-      "SELECT updated_at FROM arden.draft_document WHERE draft_id = $1", [id])).rows[0]!.updated_at.toISOString();
-    const order = async () => (await pool!.query<{ title: string; sort_position: number | null }>(`SELECT title, sort_position
-      FROM arden.draft_document WHERE collection_id = $1 AND status = 'ACTIVE' AND trashed_at IS NULL AND archived_at IS NULL
-      ORDER BY sort_position ASC NULLS FIRST, created_at DESC, draft_id DESC`, [shelf!.id])).rows.map((row) => [row.title, row.sort_position]);
+      "SELECT updated_at FROM arden.private_document WHERE id = $1", [id])).rows[0]!.updated_at.toISOString();
+    const order = async () => (await pool!.query<{ title: string; sort_position: number | null }>(`SELECT title, position AS sort_position
+      FROM arden.private_document WHERE folder_id = $1 AND status = 'ACTIVE' AND trashed_at IS NULL AND archived_at IS NULL
+      ORDER BY sort_position ASC NULLS FIRST, created_at DESC, id DESC`, [shelf!.id])).rows.map((row) => [row.title, row.sort_position]);
     const firstSaved = await savedAt(first!.id);
     const thirdSaved = await savedAt(third!.id);
 
@@ -1349,7 +1301,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query("SET LOCAL ROLE arden_runtime");
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.manager, ids.organization]);
-      expect((await client.query("SELECT 1 FROM draft_document WHERE draft_id = $1", [third!.id])).rowCount).toBe(0);
+      expect((await client.query("SELECT 1 FROM private_document WHERE id = $1", [third!.id])).rowCount).toBe(0);
     } finally {
       await client.query("ROLLBACK");
       client.release();
@@ -1365,14 +1317,14 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       .resolves.toMatchObject({ collectionId: null, position: null, archivedAt: null });
 
     // An archived note can never also be in trash; moving it to trash clears the flag.
-    await expect(pool.query(`UPDATE arden.draft_document SET archived_at = now(), trashed_at = now(), trash_batch_id = gen_random_uuid()
-      WHERE draft_id = $1`, [third!.id])).rejects.toMatchObject({ code: "23514" });
+    await expect(pool.query(`UPDATE arden.private_document SET archived_at = now(), trashed_at = now(), trash_batch_id = gen_random_uuid()
+      WHERE id = $1`, [third!.id])).rejects.toMatchObject({ code: "23514" });
     await store.setNoteArchived(ids.owner, ids.organization, third!.id, true, "arr-archive-again");
     await expect(store.trashNote(ids.owner, ids.organization, third!.id, "arr-trash-archived")).resolves.toMatchObject({ kind: "note" });
     const row = await pool.query<{ archived_at: Date | null; trashed_at: Date | null }>(
-      "SELECT archived_at, trashed_at FROM arden.draft_document WHERE draft_id = $1", [third!.id]);
+      "SELECT archived_at, trashed_at FROM arden.private_document WHERE id = $1", [third!.id]);
     expect(row.rows[0]).toMatchObject({ archived_at: null, trashed_at: expect.any(Date) });
-    const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+    const audit = await pool.query<{ details_json: unknown }>(`SELECT details AS details_json FROM arden.audit_event
       WHERE organization_id = $1 AND event_type IN ('PRIVATE_DRAFT_ARCHIVED', 'PRIVATE_DRAFT_UNARCHIVED')`, [ids.organization]);
     // Decision 0035: archiving is a routine owner-only action and is not audited.
     expect(audit.rows).toHaveLength(0);
@@ -1384,8 +1336,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const first = object("1");
     const note = await repository.createDraft(ids.owner, ids.organization, { title: "Live note", body: "one" }, first, "live-create");
     const versions = async () => (await pool!.query<{ draft_version_id: string; version_no: number; source_uri: string; sealed: boolean }>(
-      `SELECT draft_version_id, version_no, source_uri, sealed_at IS NOT NULL AS sealed FROM arden.draft_version
-        WHERE draft_id = $1 ORDER BY version_no`, [note!.id])).rows;
+      `SELECT id AS draft_version_id, version_no, file_uri AS source_uri, sealed_at IS NOT NULL AS sealed FROM arden.private_version
+        WHERE document_id = $1 ORDER BY version_no`, [note!.id])).rows;
 
     // Saves overwrite the single open version; only the replaced object is reported for erasure.
     const second = object("2");
@@ -1430,15 +1382,15 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
         client.release();
       }
     };
-    await expect(runtime("UPDATE draft_version SET content_hash = $2 WHERE draft_version_id = $1", [note!.versionId, "7".repeat(64)]))
+    await expect(runtime("UPDATE private_version SET content_hash = $2 WHERE id = $1", [note!.versionId, "7".repeat(64)]))
       .rejects.toMatchObject({ code: "55000" });
-    await expect(pool.query("UPDATE arden.draft_version SET sealed_at = NULL WHERE draft_version_id = $1", [note!.versionId]))
+    await expect(pool.query("UPDATE arden.private_version SET sealed_at = NULL WHERE id = $1", [note!.versionId]))
       .rejects.toMatchObject({ code: "55000" });
-    await expect(runtime("UPDATE draft_version SET version_no = 1 WHERE draft_version_id = $1", [afterContribution.draft.versionId]))
+    await expect(runtime("UPDATE private_version SET version_no = 1 WHERE id = $1", [afterContribution.draft.versionId]))
       .rejects.toMatchObject({ code: "55000" });
-    await expect(runtime("UPDATE draft_version SET draft_id = draft_id, created_by_membership_id = $2 WHERE draft_version_id = $1",
+    await expect(runtime("UPDATE private_version SET document_id = document_id, created_by_id = $2 WHERE id = $1",
       [afterContribution.draft.versionId, ids.managerMembership])).rejects.toMatchObject({ code: "42501" });
-    await expect(pool.query("DELETE FROM arden.draft_version WHERE draft_version_id = $1", [afterContribution.draft.versionId]))
+    await expect(pool.query("DELETE FROM arden.private_version WHERE id = $1", [afterContribution.draft.versionId]))
       .rejects.toMatchObject({ code: "55000" });
     // Another member can neither see nor overwrite the owner's open version.
     await expect(repository.updateDraft(ids.manager, ids.organization, note!.id, 4, { body: "x" }, object("8"), "live-steal"))
@@ -1492,13 +1444,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
         client.release();
       }
     };
-    await expect(runtime("UPDATE draft_version SET text_source_uri = NULL, text_content_hash = NULL WHERE draft_version_id = $1",
+    await expect(runtime("UPDATE private_version SET text_uri = NULL, text_content_hash = NULL WHERE id = $1",
       [item!.versionId])).rejects.toMatchObject({ code: "55000" });
     // Extracted text belongs only to PDF versions.
     const textNote = await repository.createDraft(ids.owner, ids.organization, { title: "Text-only", body: "words" },
       { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: hash("e") }, "pdf-text-note");
-    await expect(pool.query(`UPDATE arden.draft_version SET text_source_uri = 'arden-private-object://x', text_content_hash = $2
-      WHERE draft_version_id = $1`, [textNote!.versionId, hash("d")])).rejects.toMatchObject({ code: "23514" });
+    await expect(pool.query(`UPDATE arden.private_version SET text_uri = 'arden-private-object://x', text_content_hash = $2
+      WHERE id = $1`, [textNote!.versionId, hash("d")])).rejects.toMatchObject({ code: "23514" });
 
     // Trash and purge report the file and its text object for erasure.
     const store = repository.privateOrganization;
@@ -1526,7 +1478,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       }
     };
     const notices = async () => (await pool!.query<{ publication_title: string; shared_by_name: string }>(`SELECT publication_title, shared_by_name
-      FROM arden.arden_notification WHERE recipient_membership_id = $1 AND event_type = 'DOCUMENT_SHARED_DIRECT' AND resource_id = $2`,
+      FROM arden.notification WHERE recipient_id = $1 AND event_type = 'DOCUMENT_SHARED_DIRECT' AND resource_id = $2`,
     [ids.managerMembership, note!.id])).rows;
     try {
       // Only active members of the organization other than the owner can be chosen.
@@ -1554,11 +1506,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await expect(shares.getSharedItem(ids.organizationReviewer, ids.organization, note!.id)).resolves.toBeNull();
       await expect(repository.updateDraft(ids.manager, ids.organization, note!.id, 1, { body: "x" }, object("2"), "share-edit"))
         .resolves.toEqual({ kind: "not-found" });
-      expect((await runtime(ids.manager, "UPDATE draft_document SET title = 'taken' WHERE draft_id = $1", [note!.id])).rowCount).toBe(0);
-      expect((await runtime(ids.manager, `UPDATE private_item_share SET revoked_at = now(), revoked_by_membership_id = $2
-        WHERE draft_id = $1`, [note!.id, ids.managerMembership])).rowCount).toBe(0);
+      expect((await runtime(ids.manager, "UPDATE private_document SET title = 'taken' WHERE id = $1", [note!.id])).rowCount).toBe(0);
+      expect((await runtime(ids.manager, `UPDATE direct_share SET revoked_at = now(), revoked_by_id = $2
+        WHERE document_id = $1`, [note!.id, ids.managerMembership])).rowCount).toBe(0);
       // Recipients read only the current version, never the owner's other items or collections.
-      expect((await runtime(ids.manager, "SELECT draft_id FROM draft_document WHERE workspace_id = (SELECT workspace_id FROM draft_document WHERE draft_id = $1)", [note!.id])).rows)
+      expect((await runtime(ids.manager, "SELECT id AS draft_id FROM private_document WHERE workspace_id = (SELECT workspace_id FROM private_document WHERE id = $1)", [note!.id])).rows)
         .toEqual([{ draft_id: note!.id }]);
 
       // A later save is what the recipient sees next.
@@ -1570,6 +1522,18 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
         .resolves.toBeNull();
       await expect(shares.updateSettings(ids.owner, ids.organization, { enabled: true, recipientLimit: 1 }, "settings-limit"))
         .resolves.toEqual({ enabled: true, recipientLimit: 1 });
+      const settings = await pool.query(`SELECT direct_share_enabled, direct_share_recipient_limit,
+        direct_share_updated_by_id AS direct_share_updated_by_membership_id, direct_share_updated_at
+        FROM arden.organization WHERE id = $1`, [ids.organization]);
+      expect(settings.rows).toEqual([{
+        direct_share_enabled: true, direct_share_recipient_limit: 1,
+        direct_share_updated_by_membership_id: ids.ownerMembership, direct_share_updated_at: expect.any(Date),
+      }]);
+      expect((await runtime(ids.manager, `UPDATE organization SET direct_share_recipient_limit = 99
+        WHERE id = $1`, [ids.organization])).rowCount).toBe(0);
+      expect((await runtime(ids.manager,
+        "SELECT update_organization_direct_share_settings($1, true, 99, 'non-admin') AS updated",
+        [ids.organization])).rows).toEqual([{ updated: false }]);
       await expect(shares.share(ids.owner, ids.organization, note!.id, [ids.organizationReviewerMembership], "share-over"))
         .resolves.toEqual({ kind: "limit", limit: 1 });
       await shares.updateSettings(ids.owner, ids.organization, { enabled: false, recipientLimit: 1 }, "settings-off");
@@ -1579,11 +1543,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await shares.updateSettings(ids.owner, ids.organization, { enabled: true, recipientLimit: 10 }, "settings-on");
 
       // An owner who stops being an active member no longer shares anything.
-      await pool.query("UPDATE arden.organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1", [ids.ownerMembership]);
+      await pool.query("UPDATE arden.membership SET status = 'SUSPENDED' WHERE id = $1", [ids.ownerMembership]);
       try {
         await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
       } finally {
-        await pool.query("UPDATE arden.organization_membership SET status = 'ACTIVE' WHERE membership_id = $1", [ids.ownerMembership]);
+        await pool.query("UPDATE arden.membership SET status = 'ACTIVE' WHERE id = $1", [ids.ownerMembership]);
       }
       await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.not.toBeNull();
 
@@ -1606,9 +1570,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
 
       // A share row can only be revoked, once; audit never carries the title.
-      await expect(pool.query("UPDATE arden.private_item_share SET recipient_membership_id = $2 WHERE draft_id = $1",
+      await expect(pool.query("UPDATE arden.direct_share SET recipient_id = $2 WHERE document_id = $1",
         [note!.id, ids.organizationReviewerMembership])).rejects.toMatchObject({ code: "55000" });
-      const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+      const audit = await pool.query<{ details_json: unknown }>(`SELECT details AS details_json FROM arden.audit_event
         WHERE organization_id = $1 AND event_type IN ('PRIVATE_ITEM_SHARED', 'PRIVATE_ITEM_SHARE_REVOKED', 'DIRECT_SHARE_SETTINGS_UPDATED')`, [ids.organization]);
       expect(audit.rows.length).toBeGreaterThanOrEqual(8);
       expect(audit.rows).toContainEqual({ details_json: expect.objectContaining({
@@ -1616,7 +1580,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       }) });
       expect(JSON.stringify(audit.rows)).not.toContain("Onboarding plan");
     } finally {
-      await pool.query("DELETE FROM arden.organization_direct_share_setting WHERE organization_id = $1", [ids.organization]);
+      await pool.query(`UPDATE arden.organization SET direct_share_enabled = true, direct_share_recipient_limit = 10,
+        direct_share_updated_by_id = NULL, direct_share_updated_at = NULL WHERE id = $1`, [ids.organization]);
     }
   }, 60_000);
 });

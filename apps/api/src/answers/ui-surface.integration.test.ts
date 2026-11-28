@@ -20,7 +20,6 @@ const id = () => randomUUID();
 const ids = {
   org: id(),
   scope: id(),
-  allMembers: id(),
   dept: id(),
   deptRole: id(),
   kbOrg: id(),
@@ -107,10 +106,10 @@ async function seedIndexedPublication(
   };
 
   await client.query(`
-    INSERT INTO shared_draft (
-      shared_draft_id, organization_id, author_membership_id, title, classification,
-      status, responsible_department_id, target_scope_type, current_version_no,
-      management, draft_selection_id
+    INSERT INTO company_document (
+      id, organization_id, author_id, title, classification,
+      status, owner_department_id, target_scope, current_version_no,
+      metadata, reader_policy_id
     ) VALUES ($1, $2, $3, $4, 'INTERNAL', 'ACTIVE', $5, 'ORGANIZATION', 1, $6::jsonb, $7)`, [
     input.documentId,
     ids.org,
@@ -121,19 +120,19 @@ async function seedIndexedPublication(
     input.readerSelectionId,
   ]);
   await client.query(`
-    INSERT INTO shared_draft_version (
-      shared_draft_version_id, shared_draft_id, version_no, content_uri, mime_type, content_hash
+    INSERT INTO working_version (
+      id, document_id, version_no, file_uri, mime_type, content_hash
     ) VALUES ($1, $2, 1, $3, 'text/plain', $4)`, [draftVersionId, input.documentId, contentUri, contentHash]);
   await client.query(`
-    INSERT INTO shared_submission (
-      submission_id, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-      submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id,
-      title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
-      content_hash, status, publication_state, submit_request_id, proposed_selection_id,
-      approved_selection_id, management
+    INSERT INTO review_submission (
+      id, organization_id, document_id, working_version_id, snapshot_version_no,
+      submitted_by_id, target_scope, target_department_id, owner_department_id,
+      title, classification, policy_version, review_rule, file_uri, mime_type,
+      content_hash, status, publication_state, submit_request_id, proposed_reader_policy_id,
+      approved_reader_policy_id, metadata
     ) VALUES (
-      $1, $2, $3, $4, 1, $5, 'ORGANIZATION', NULL, $6, $7, 'INTERNAL', $8::uuid[], 1, 'GRANT_SCOPE',
-      $9, 'text/plain', $10, 'APPROVED', 'ACTIVE', gen_random_uuid(), $11, $11, $12::jsonb
+      $1, $2, $3, $4, 1, $5, 'ORGANIZATION', NULL, $6, $7, 'INTERNAL', 1, 'GRANT_SCOPE',
+      $8, 'text/plain', $9, 'APPROVED', 'ACTIVE', gen_random_uuid(), $10, $10, $11::jsonb
     )`, [
     submissionId,
     ids.org,
@@ -142,21 +141,20 @@ async function seedIndexedPublication(
     ids.authorM,
     ids.dept,
     input.title,
-    [ids.allMembers],
     contentUri,
     contentHash,
     input.readerSelectionId,
     JSON.stringify(input.management),
   ]);
   await client.query(`
-    INSERT INTO published_knowledge_version (
-      published_version_id, submission_id, knowledge_base_id, published_by_membership_id,
-      author_membership_id, title, version_no, content_uri, content_hash, index_status, published_at,
-      shared_draft_id, classification, responsible_department_id, audience_role_ids,
-      valid_from, reader_selection_id, management
+    INSERT INTO published_version (
+      id, review_submission_id, knowledge_base_id, published_by_id,
+      author_id, title, version_no, file_uri, content_hash, index_status, published_at,
+      document_id, classification, owner_department_id,
+      valid_from, reader_policy_id, metadata
     ) VALUES (
       $1, $2, $3, NULL, $4, $5, 1, $6, $7, 'INDEXED', now() - interval '1 hour', $8, 'INTERNAL', $9,
-      $10::uuid[], now() - interval '1 hour', $11, $12::jsonb
+      now() - interval '1 hour', $10, $11::jsonb
     )`, [
     publishedVersionId,
     submissionId,
@@ -167,25 +165,23 @@ async function seedIndexedPublication(
     contentHash,
     input.documentId,
     ids.dept,
-    [ids.allMembers],
     input.readerSelectionId,
     JSON.stringify(input.management),
   ]);
   await client.query(`
-    INSERT INTO knowledge_current_publication (
-      shared_draft_id, organization_id, published_version_id, audience_role_ids,
-      target_scope_type, target_department_id, valid_from, reader_selection_id
-    ) VALUES ($1, $2, $3, $4::uuid[], 'ORGANIZATION', NULL, now() - interval '1 hour', $5)`, [
+    INSERT INTO current_publication (
+      document_id, organization_id, published_version_id,
+      target_scope, target_department_id, valid_from, reader_policy_id
+    ) VALUES ($1, $2, $3, 'ORGANIZATION', NULL, now() - interval '1 hour', $4)`, [
     input.documentId,
     ids.org,
     publishedVersionId,
-    [ids.allMembers],
     input.readerSelectionId,
   ]);
   await client.query(`
-    INSERT INTO knowledge_index_generation (
-      generation_id, organization_id, submission_id, snapshot_version_id, snapshot_content_hash,
-      status, manifest_json, shared_draft_id, completed_at
+    INSERT INTO index_generation (
+      id, organization_id, review_submission_id, snapshot_version_id, snapshot_content_hash,
+      status, manifest, document_id, completed_at
     ) VALUES ($1, $2, $3, $4, $5, 'READY', $6::jsonb, $7, now())`, [
     generationId,
     ids.org,
@@ -222,7 +218,7 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
     }
 
     await asSuperuser(async (client) => {
-      await client.query("INSERT INTO organization (organization_id, name, slug) VALUES ($1, 'UI Surface Org', $2)", [
+      await client.query("INSERT INTO organization (id, name, slug) VALUES ($1, 'UI Surface Org', $2)", [
         ids.org,
         `ui-surface-${ids.org}`,
       ]);
@@ -232,61 +228,52 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
         [ids.reader, "Rita Reader"],
         [ids.reviewer, "Rex Reviewer"],
       ] as const) {
-        await client.query("INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, $3)", [
+        await client.query("INSERT INTO account (id, email, full_name) VALUES ($1, $2, $3)", [
           uid,
           `${uid}@example.test`,
           name,
         ]);
       }
       await client.query(`
-        INSERT INTO organization_membership (membership_id, organization_id, user_id, status)
+        INSERT INTO membership (id, organization_id, account_id, status)
         VALUES ($1,$5,$6,'ACTIVE'), ($2,$5,$7,'ACTIVE'), ($3,$5,$8,'ACTIVE'), ($4,$5,$9,'ACTIVE')`, [
         ids.adminM, ids.authorM, ids.readerM, ids.reviewerM,
         ids.org, ids.admin, ids.author, ids.reader, ids.reviewer,
       ]);
-      await client.query("INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Security')", [
+      await client.query("INSERT INTO role (id, organization_id, code, name) VALUES ($1, $2, $3, 'Security')", [
         ids.deptRole, ids.org, `SEC_${ids.deptRole.replaceAll("-", "").toUpperCase()}`,
       ]);
       await client.query(`
-        INSERT INTO department (department_id, organization_id, code, name, default_role_id, status)
+        INSERT INTO department (id, organization_id, code, name, default_role_id, status)
         VALUES ($1, $2, 'SEC', 'Security', $3, 'ACTIVE')`, [ids.dept, ids.org, ids.deptRole]);
       await client.query(`
         INSERT INTO department_membership (membership_id, department_id, is_primary)
         VALUES ($1,$5,true), ($2,$5,true), ($3,$5,true), ($4,$5,true)`, [
         ids.adminM, ids.authorM, ids.readerM, ids.reviewerM, ids.dept,
       ]);
-      await client.query("INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')", [
+      await client.query("INSERT INTO access_scope (id, organization_id, scope) VALUES ($1, $2, 'ORGANIZATION')", [
         ids.scope, ids.org,
       ]);
       await client.query(`
         INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.adminM, ids.scope]);
+        SELECT $1, id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.adminM, ids.scope]);
       await client.query(`
         INSERT INTO reviewer_grant (
-          organization_id, reviewer_membership_id, scope, department_id, granted_by_membership_id,
+          organization_id, reviewer_id, scope, department_id, granted_by_id,
           classifications, level, status
         ) VALUES ($1, $2, 'ORGANIZATION', NULL, $3, ARRAY['INTERNAL', 'CONFIDENTIAL'], 'STANDARD', 'ACTIVE')`, [
         ids.org, ids.reviewerM, ids.adminM,
       ]);
-      await client.query("INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone')", [
-        ids.allMembers, ids.org,
-      ]);
-      await client.query(`
-        INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`, [ids.allMembers]);
-      await client.query(`
-        INSERT INTO audience (audience_id, organization_id, kind, name, is_managed, legacy_role_id)
-        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone', true, $1)`, [ids.allMembers, ids.org]);
-      await client.query("INSERT INTO knowledge_base (knowledge_base_id, organization_id, name, scope_type) VALUES ($1, $2, 'Org KB', 'ORGANIZATION')", [
+      await client.query("INSERT INTO knowledge_base (id, organization_id, name, scope) VALUES ($1, $2, 'Org KB', 'ORGANIZATION')", [
         ids.kbOrg, ids.org,
       ]);
       await client.query(`
-        INSERT INTO reader_selection (selection_id, organization_id, reader_mode, department_id)
+        INSERT INTO reader_policy (id, organization_id, mode, department_id)
         VALUES ($1, $3, 'ORGANIZATION', NULL), ($2, $3, 'SELECTED_MEMBERS', NULL)`, [
         ids.selOrg, ids.selRestricted, ids.org,
       ]);
       await client.query(`
-        INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+        INSERT INTO policy_reader (reader_policy_id, organization_id, membership_id, position)
         VALUES ($1, $2, $3, 1), ($1, $2, $4, 2)`, [ids.selRestricted, ids.org, ids.authorM, ids.adminM]);
 
       await client.query("SET LOCAL session_replication_role = replica");
@@ -321,9 +308,9 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
       // Seed one open maintenance case pinned to primaryVersionId (filed by reader).
       await client.query(`
         INSERT INTO maintenance_case (
-          organization_id, origin, reporter_membership_id, document_id, published_version_id,
-          content_hash, title, description, route_department_id, classification,
-          author_membership_id, reporter_status
+          organization_id, origin, reporter_id, document_id, published_version_id,
+          content_hash, title, description, review_department_id, classification,
+          author_id, reporter_status
         ) VALUES ($1, 'READER_REPORT', $2, $3, $4, $5, 'Security Policy', 'Check MFA section',
           $6, 'INTERNAL', $7, 'Submitted')`, [
         ids.org,
@@ -337,7 +324,7 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
 
       // Seed two relationships from docPrimary (one readable peer, one restricted peer).
       await client.query(`
-        INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, relationship_type, created_by_membership_id)
+        INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, type, created_by_id)
         VALUES ($1, $2, $3, 'REFERENCES', $5), ($1, $2, $4, 'RELATED', $5)`, [
         ids.org, ids.docPrimary, ids.docPeer, ids.docRestrictedPeer, ids.authorM,
       ]);
@@ -353,44 +340,41 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
         await asSuperuser(async (client) => {
           await client.query("SET LOCAL session_replication_role = replica");
           for (const table of [
-            "ai_turn_surface_binding",
-            "ai_turn_evidence",
-            "ai_conversation_turn",
-            "ai_conversation",
-            "maintenance_case_event",
-            "maintenance_notification",
-            "maintenance_idempotency",
+            "turn_display_source",
+            "turn_evidence",
+            "conversation_turn",
+            "conversation",
+            "case_event",
+            "case_intake_key",
             "maintenance_case",
             "document_relationship",
-            "publication_validity_renewal",
-            "knowledge_current_publication",
-            "knowledge_index_generation",
-            "shared_submission",
-            "shared_draft",
-            "selected_reader",
-            "reader_selection",
+            "publication_renewal",
+            "current_publication",
+            "index_generation",
+            "review_submission",
+            "company_document",
+            "policy_reader",
+            "reader_policy",
             "knowledge_base",
             "reviewer_grant",
-            "audience",
             "audit_event",
           ]) {
             await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [ids.org]);
           }
-          await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id = ANY($1::uuid[])", [
+          await client.query("DELETE FROM working_version WHERE document_id = ANY($1::uuid[])", [
             [ids.docPrimary, ids.docPeer, ids.docRestrictedPeer],
           ]);
-          await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id = ANY($1::uuid[])", [
+          await client.query("DELETE FROM published_version WHERE document_id = ANY($1::uuid[])", [
             [ids.docPrimary, ids.docPeer, ids.docRestrictedPeer],
           ]);
           await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])", [membershipIds]);
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [membershipIds]);
-          await client.query("DELETE FROM organization_membership WHERE organization_id = $1", [ids.org]);
+          await client.query("DELETE FROM membership WHERE organization_id = $1", [ids.org]);
           await client.query("DELETE FROM department WHERE organization_id = $1", [ids.org]);
-          await client.query("DELETE FROM role_permission WHERE role_id = $1", [ids.allMembers]);
           await client.query("DELETE FROM role WHERE organization_id = $1", [ids.org]);
           await client.query("DELETE FROM access_scope WHERE organization_id = $1", [ids.org]);
-          await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [userIds]);
-          await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.org]);
+          await client.query("DELETE FROM account WHERE id = ANY($1::uuid[])", [userIds]);
+          await client.query("DELETE FROM organization WHERE id = $1", [ids.org]);
         });
       }
     } finally {
@@ -455,7 +439,7 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
 
     const rls = await pool.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(`
       SELECT relrowsecurity, relforcerowsecurity FROM pg_class
-       WHERE oid = 'arden.ai_turn_surface_binding'::regclass`);
+       WHERE oid = 'arden.turn_display_source'::regclass`);
     expect(rls.rows[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: true });
 
     // Ordinary reader (even though they filed the case!) and Author must see openMaintenanceCaseCount === null.
@@ -485,7 +469,7 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
     expect(peerVersionId).toBeTruthy();
   });
 
-  it("persists ui_surface + ai_turn_surface_binding and enforces 4-path fail-closed revocation on real PostgreSQL", async () => {
+  it("persists ui_surface + turn_display_source and enforces 4-path fail-closed revocation on real PostgreSQL", async () => {
     if (!pool || !repository) throw new Error("Database unavailable");
     const engine = new GovernedAnswering(repository, stubAiClient());
     const conversationId = id();
@@ -527,10 +511,10 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
     // Revoke reader access by narrowing target readers to selRestricted (author + admin only).
     await asSuperuser(async (client) => {
       await client.query("SET LOCAL session_replication_role = replica");
-      await client.query("UPDATE published_knowledge_version SET reader_selection_id = $1 WHERE published_version_id = $2", [
+      await client.query("UPDATE published_version SET reader_policy_id = $1 WHERE id = $2", [
         ids.selRestricted, primaryVersionId,
       ]);
-      await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $1 WHERE shared_draft_id = $2", [
+      await client.query("UPDATE current_publication SET reader_policy_id = $1 WHERE document_id = $2", [
         ids.selRestricted, ids.docPrimary,
       ]);
     });
@@ -571,10 +555,10 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
       // Restore reader selection for clean teardown.
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("UPDATE published_knowledge_version SET reader_selection_id = $1 WHERE published_version_id = $2", [
+        await client.query("UPDATE published_version SET reader_policy_id = $1 WHERE id = $2", [
           ids.selOrg, primaryVersionId,
         ]);
-        await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $1 WHERE shared_draft_id = $2", [
+        await client.query("UPDATE current_publication SET reader_policy_id = $1 WHERE document_id = $2", [
           ids.selOrg, ids.docPrimary,
         ]);
       });
@@ -651,49 +635,49 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
                    ord
               FROM unnest($1::uuid[]) WITH ORDINALITY AS t(d_id, ord)
           ), ins_draft AS (
-            INSERT INTO shared_draft (
-              shared_draft_id, organization_id, author_membership_id, title, classification,
-              status, responsible_department_id, target_scope_type, current_version_no,
-              management, draft_selection_id
+            INSERT INTO company_document (
+              id, organization_id, author_id, title, classification,
+              status, owner_department_id, target_scope, current_version_no,
+              metadata, reader_policy_id
             )
             SELECT s.d_id, $2, $3, 'Bulk Expiry ' || s.ord, 'INTERNAL', 'ACTIVE', $4, 'ORGANIZATION', 1, $5::jsonb, $6
               FROM seed s
           ), ins_dv AS (
-            INSERT INTO shared_draft_version (
-              shared_draft_version_id, shared_draft_id, version_no, content_uri, mime_type, content_hash
+            INSERT INTO working_version (
+              id, document_id, version_no, file_uri, mime_type, content_hash
             )
             SELECT s.dv_id, s.d_id, 1, 'arden-private-object://' || s.d_id, 'text/plain', $7
               FROM seed s
           ), ins_sub AS (
-            INSERT INTO shared_submission (
-              submission_id, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-              submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id,
-              title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
-              content_hash, status, publication_state, submit_request_id, proposed_selection_id,
-              approved_selection_id, management
+            INSERT INTO review_submission (
+              id, organization_id, document_id, working_version_id, snapshot_version_no,
+              submitted_by_id, target_scope, target_department_id, owner_department_id,
+              title, classification, policy_version, review_rule, file_uri, mime_type,
+              content_hash, status, publication_state, submit_request_id, proposed_reader_policy_id,
+              approved_reader_policy_id, metadata
             )
             SELECT s.sub_id, $2, s.d_id, s.dv_id, 1, $3, 'ORGANIZATION', NULL, $4,
-                   'Bulk Expiry ' || s.ord, 'INTERNAL', $8::uuid[], 1, 'GRANT_SCOPE',
+                   'Bulk Expiry ' || s.ord, 'INTERNAL', 1, 'GRANT_SCOPE',
                    'arden-private-object://' || s.d_id, 'text/plain', $7, 'APPROVED', 'ACTIVE',
                    gen_random_uuid(), $6, $6, $5::jsonb
               FROM seed s
           ), ins_pv AS (
-            INSERT INTO published_knowledge_version (
-              published_version_id, submission_id, knowledge_base_id, published_by_membership_id,
-              author_membership_id, title, version_no, content_uri, content_hash, index_status, published_at,
-              shared_draft_id, classification, responsible_department_id, audience_role_ids,
-              valid_from, reader_selection_id, management
+            INSERT INTO published_version (
+              id, review_submission_id, knowledge_base_id, published_by_id,
+              author_id, title, version_no, file_uri, content_hash, index_status, published_at,
+              document_id, classification, owner_department_id,
+              valid_from, reader_policy_id, metadata
             )
-            SELECT s.pv_id, s.sub_id, $9, NULL, $3, 'Bulk Expiry ' || s.ord, 1,
+            SELECT s.pv_id, s.sub_id, $8, NULL, $3, 'Bulk Expiry ' || s.ord, 1,
                    'arden-private-object://' || s.d_id, $7, 'INDEXED', now() - interval '10 days',
-                   s.d_id, 'INTERNAL', $4, $8::uuid[], now() - interval '10 days', $6, $5::jsonb
+                   s.d_id, 'INTERNAL', $4, now() - interval '10 days', $6, $5::jsonb
               FROM seed s
           )
-          INSERT INTO knowledge_current_publication (
-            shared_draft_id, organization_id, published_version_id, audience_role_ids,
-            target_scope_type, target_department_id, valid_from, reader_selection_id
+          INSERT INTO current_publication (
+            document_id, organization_id, published_version_id,
+            target_scope, target_department_id, valid_from, reader_policy_id
           )
-          SELECT s.d_id, $2, s.pv_id, $8::uuid[], 'ORGANIZATION', NULL, now() - interval '10 days', $6
+          SELECT s.d_id, $2, s.pv_id, 'ORGANIZATION', NULL, now() - interval '10 days', $6
             FROM seed s`, [
           bulkDocIds,
           ids.org,
@@ -702,7 +686,6 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
           bulkManagement,
           ids.selOrg,
           contentHash,
-          [ids.allMembers],
           ids.kbOrg,
         ]);
 
@@ -755,20 +738,20 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
         await client.query(`
-          INSERT INTO shared_submission (
-            submission_id, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-            submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id,
-            title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
+          INSERT INTO review_submission (
+            id, organization_id, document_id, working_version_id, snapshot_version_no,
+            submitted_by_id, target_scope, target_department_id, owner_department_id,
+            title, classification, policy_version, review_rule, file_uri, mime_type,
             content_hash, status, publication_state, submit_request_id, request_type, request_reason,
-            target_published_version_id, renewal_expiration_date, on_behalf_of_author
+            target_published_version_id, renewal_valid_until, on_behalf_of_author
           )
-          SELECT $1, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-                 $2, target_scope_type, target_department_id, responsible_department_id,
-                 title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
+          SELECT $1, organization_id, document_id, working_version_id, snapshot_version_no,
+                 $2, target_scope, target_department_id, owner_department_id,
+                 title, classification, policy_version, review_rule, file_uri, mime_type,
                  content_hash, 'PENDING_REVIEW', 'NONE', gen_random_uuid(), 'RENEWAL', 'Extending validity',
                  $3, '2099-12-31'::date, false
-            FROM shared_submission
-           WHERE shared_draft_id = $4 AND status = 'APPROVED'
+            FROM review_submission
+           WHERE document_id = $4 AND status = 'APPROVED'
            LIMIT 1`, [pendingSubmissionId, ids.authorM, soonVersionId, soonDocId]);
       });
 
@@ -778,7 +761,7 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
 
       // 5. Inactive author unlocks immediate on-behalf renewal for Org Admin & Responsible Reviewer even for 2099 expiry!
       await asSuperuser((client) => client.query(
-        "UPDATE organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1",
+        "UPDATE membership SET status = 'SUSPENDED' WHERE id = $1",
         [ids.authorM],
       ));
       try {
@@ -792,7 +775,7 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
         expect(exactReviewerRenewal?.[0]?.authorActive).toBe(false);
       } finally {
         await asSuperuser((client) => client.query(
-          "UPDATE organization_membership SET status = 'ACTIVE' WHERE membership_id = $1",
+          "UPDATE membership SET status = 'ACTIVE' WHERE id = $1",
           [ids.authorM],
         ));
       }
@@ -800,12 +783,12 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
       const extraDocs = [...bulkDocIds, soonDocId];
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("DELETE FROM knowledge_current_publication WHERE shared_draft_id = ANY($1::uuid[])", [extraDocs]);
-        await client.query("DELETE FROM knowledge_index_generation WHERE shared_draft_id = ANY($1::uuid[])", [extraDocs]);
-        await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id = ANY($1::uuid[])", [extraDocs]);
-        await client.query("DELETE FROM shared_submission WHERE shared_draft_id = ANY($1::uuid[]) OR submission_id = $2", [extraDocs, pendingSubmissionId]);
-        await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id = ANY($1::uuid[])", [extraDocs]);
-        await client.query("DELETE FROM shared_draft WHERE shared_draft_id = ANY($1::uuid[])", [extraDocs]);
+        await client.query("DELETE FROM current_publication WHERE document_id = ANY($1::uuid[])", [extraDocs]);
+        await client.query("DELETE FROM index_generation WHERE document_id = ANY($1::uuid[])", [extraDocs]);
+        await client.query("DELETE FROM published_version WHERE document_id = ANY($1::uuid[])", [extraDocs]);
+        await client.query("DELETE FROM review_submission WHERE document_id = ANY($1::uuid[]) OR id = $2", [extraDocs, pendingSubmissionId]);
+        await client.query("DELETE FROM working_version WHERE document_id = ANY($1::uuid[])", [extraDocs]);
+        await client.query("DELETE FROM company_document WHERE id = ANY($1::uuid[])", [extraDocs]);
       });
     }
   }, 120_000);
