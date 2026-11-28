@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
+REVIEWED_FULL_SCHEMA_MIGRATION_COUNT = 92
 REVIEWED_BASELINE_DEFINER_COUNT = 42
 # Isolated System Admin executors (0072/0074). They stay superuser-owned and outside the transfer.
 REVIEWED_SYSTEM_DEFINERS = {
@@ -56,7 +57,7 @@ def verify_full_schema(container):
             raise RuntimeError("Full-schema ownership rehearsal failed")
         return result.stdout.strip()
 
-    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "81":
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != str(REVIEWED_FULL_SCHEMA_MIGRATION_COUNT):
         raise ValueError("Review the full-schema ownership fixture when migrations change")
     sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
         "NOCREATEDB NOCREATEROLE NOREPLICATION")
