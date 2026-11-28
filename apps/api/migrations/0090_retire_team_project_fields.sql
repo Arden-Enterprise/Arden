@@ -5,8 +5,9 @@ LOCK TABLE reviewer_grant, shared_draft, shared_submission, published_knowledge_
 
 DO $$
 BEGIN
+    -- Working draft tags are retired metadata. Review, publication and grant
+    -- tags may encode historical decisions and require separate reconciliation.
     IF EXISTS (SELECT 1 FROM reviewer_grant WHERE team_tag IS NOT NULL OR project_tag IS NOT NULL)
-       OR EXISTS (SELECT 1 FROM shared_draft WHERE team_tag IS NOT NULL OR project_tag IS NOT NULL)
        OR EXISTS (SELECT 1 FROM shared_submission WHERE team_tag IS NOT NULL OR project_tag IS NOT NULL)
        OR EXISTS (SELECT 1 FROM published_knowledge_version WHERE team_tag IS NOT NULL OR project_tag IS NOT NULL)
        OR EXISTS (SELECT 1 FROM maintenance_case WHERE team_tag IS NOT NULL OR project_tag IS NOT NULL) THEN

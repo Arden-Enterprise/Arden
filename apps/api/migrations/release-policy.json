@@ -532,13 +532,13 @@
     {
       "id": "0089",
       "filename": "0089_retire_legacy_collection_links.sql",
-      "sha256": "286c5e568916396675f3898915732490d192e15c83858edf6d1f610bb379beb3",
+      "sha256": "f4e3bb39ee3c58e4c5dd9e0a639e5005fc529c2679ae3d8cf09c56cab331d1b4",
       "rollout": "operator"
     },
     {
       "id": "0090",
       "filename": "0090_retire_team_project_fields.sql",
-      "sha256": "ca9bcbf1b87803d2e177970b31eeb3597c1327057850c4314b70097770d60a9f",
+      "sha256": "37c23681c8fec12aedf3f0651f06c21456919d768c00375ce17dc1d1156cb595",
       "rollout": "operator"
     },
     {

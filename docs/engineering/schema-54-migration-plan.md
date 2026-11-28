@@ -47,7 +47,7 @@ Các bước thuộc một đợt chuyển đổi. Khi thực hiện trên môi 
 
 ## 3. Catalog và policy legacy
 
-- **Giữ** `knowledge_collection` và `knowledge_collection_placement` làm Handbook. Giữ `allowed_types`, `collection_id`, `shared_draft_id`, `placement_revision`. Quy đổi `knowledge_collection_document.published_version_id` về `shared_draft_id`, đối chiếu `collection_id` với placement hiện hành và lưu dấu vết gán cũ khi cần. `ordinal` là thứ tự legacy, chỉ giữ với dữ liệu lịch sử cần đối chiếu.
+- **Giữ** `knowledge_collection` và `knowledge_collection_placement` làm Handbook. Migration `0089` đối chiếu liên kết phiên bản cũ với placement ở cấp tài liệu. Placement hiện hành được ưu tiên, kể cả khi Org Admin đã gỡ tài liệu khỏi Handbook. Nếu chưa có placement và liên kết cũ vẫn hợp lệ, migration dừng để Org Admin chốt vị trí. Tài liệu không đủ điều kiện vào Handbook nằm trong danh sách chung nếu người dùng còn quyền đọc. Các liên kết bị thay thế được lưu dấu vết trong audit.
 - **Gỡ** `knowledge_collection_document`, `document_category` và `authorization_policy` sau khi gỡ các consumer. Gỡ `shared_draft.category_id` và `shared_submission.category_id` sau khi đối chiếu dữ liệu Category còn dùng. Giữ metadata Document Type, Document Code và Version. Thẩm định `effect`, `condition_json`, `status` và `effective_from` của `authorization_policy` trước retirement.
 - **Giữ** `document_relationship` cùng hai FK nguồn/đích và `document_relationship_idempotency`. **Nghiệm thu** tạo tổ chức, placement, chuyển/gỡ, archive Handbook, lọc Document Type, Graph và phép đọc theo Target Readers.
 
