@@ -253,9 +253,27 @@ class ProtocolTests(unittest.TestCase):
         stream = io.BytesIO(header + self.payload)
         self.assertEqual(protocol.read_header(stream, "staging")[0]["op"], "upload")
         self.assertEqual(stream.read(), self.payload)
-        for raw in [b"x" * (protocol.MAX_HEADER + 1) + b"\n", b'{"op":"status","environment":"staging"}']:
+        for raw in [b"x" * protocol.MAX_STAGING_HEADER + b"\n", b'{"op":"status","environment":"staging"}']:
             with self.subTest(raw=raw[:20]), self.assertRaises(ValueError):
                 protocol.read_header(io.BytesIO(raw), "staging")
+
+    def test_staging_plan_fits_the_92_entry_inventory_and_job_identity(self):
+        inventory = [{"id": f"{i:04}", "filename": f"{i:04}_example_operator_schema_migration.sql",
+                      "sha256": "d" * 64, "rollout": "operator"} for i in range(1, 93)]
+        fingerprint = hashlib.sha256(json.dumps(inventory, separators=(",", ":")).encode()).hexdigest()
+        request = {"op": "plan-migrations", "environment": "staging", "commit": "a" * 40,
+                   "tree": "b" * 40, "run_id": "123", "attempt": 1,
+                   "migrations": fingerprint, "migration_inventory": inventory}
+        proof = "a" * 2800
+
+        def envelope():
+            return json.dumps({"request": request, "identity_token": proof}, separators=(",", ":")).encode() + b"\n"
+
+        self.assertGreater(len(envelope()), protocol.MAX_HEADER)
+        self.assertEqual(protocol.read_header(io.BytesIO(envelope()), "staging"), (request, proof))
+        request["environment"] = "production"
+        with self.assertRaisesRegex(ValueError, "oversized request header"):
+            protocol.read_header(io.BytesIO(envelope()), "production")
 
     def test_malformed_nested_image_configuration_is_a_validation_failure(self):
         self.assertTrue(hasattr(protocol, "validate_image_config"), "Image config validator is not implemented")
