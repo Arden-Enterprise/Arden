@@ -70,6 +70,8 @@ The candidate's migrations missing from the target ledger are the pending set. I
 
 Every migration plan, upload, deployment and production promotion carries a short-lived GitHub Actions identity proof bound to that exact request. The server checks GitHub's signature and the repository/owner IDs, workflow, environment, branch, commit, run and hosted-runner claims. Only the release job gets `id-token: write`; PR/check jobs get no identity permission or deployment secret. Status inspection still works with the restricted SSH key alone. Stored receipts contain verified metadata, never the bearer token. Production rejects legacy or unauthenticated staging eligibility. Protecting the reviewed workflow is part of this trust boundary; the identity proves which job authorized the request, rather than independently proving its compilation/scanning logic.
 
+The staging workflow may upload the verified image pair when the receiver reports the exact operator range `0078`–`0092`. The job still exits with `REQUIRES_OPERATOR` and sends no activation request. This lets the operator verify the uploaded candidate and the previous release, then stop the old API and worker before the physical renames. After applying the approved SQL, verify `NO_PENDING` before starting the candidate. A root-only cutover needs its own recovery record and smoke checks. A later signed workflow can establish normal staging release evidence.
+
 ### Ownership handoff must preserve application execution
 
 The DDL migration role owns schema/tables, invoker routines and the ledger, but
