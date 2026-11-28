@@ -72,6 +72,8 @@ Every migration plan, upload, deployment and production promotion carries a shor
 
 The staging workflow may upload the verified image pair when the receiver reports the exact operator range `0078`–`0092`. The job still exits with `REQUIRES_OPERATOR` and sends no activation request. This lets the operator verify the uploaded candidate and the previous release, then stop the old API and worker before the physical renames. After applying the approved SQL, verify `NO_PENDING` before starting the candidate. A root-only cutover needs its own recovery record and smoke checks. A later signed workflow can establish normal staging release evidence.
 
+The receiver reads up to 32 KiB for the staging header so the complete 92-entry migration inventory and the job identity fit in one request. The production header limit is 16 KiB. Both environments validate the request shape and GitHub identity separately from the byte limit.
+
 ### Ownership handoff must preserve application execution
 
 The DDL migration role owns schema/tables, invoker routines and the ledger, but

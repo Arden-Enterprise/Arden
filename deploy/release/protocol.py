@@ -12,6 +12,7 @@ MAX_EXPANDED = 1536 * 1024 * 1024
 MAX_MEMBERS = 4096
 MAX_JSON = 1024 * 1024
 MAX_HEADER = 16384
+MAX_STAGING_HEADER = 32768
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -214,8 +215,9 @@ def validate_request(value, forced_environment):
 
 
 def read_header(stream, environment):
-    raw = stream.readline(MAX_HEADER + 1)
-    if len(raw) > MAX_HEADER or not raw.endswith(b"\n"):
+    limit = MAX_STAGING_HEADER if environment == "staging" else MAX_HEADER
+    raw = stream.readline(limit + 1)
+    if len(raw) > limit or not raw.endswith(b"\n"):
         raise ValueError("Missing or oversized request header")
     value = strict_json(raw)
     if isinstance(value, dict) and value.get("op") == "status":
