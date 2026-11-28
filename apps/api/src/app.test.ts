@@ -110,7 +110,8 @@ describe("API auth and private draft routes", () => {
     repository.authorizedAiSources = [{
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
-      classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
       chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
     }];
     askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
@@ -134,7 +135,8 @@ describe("API auth and private draft routes", () => {
     repository.authorizedAiSources = [{
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
-      classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
       chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null }],
     }];
     askArden.onAnswer = () => { repository.authorizedAiSources = []; };
@@ -196,7 +198,8 @@ describe("API auth and private draft routes", () => {
     repository.authorizedAiSources = [{
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
-      classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
       chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
     }];
     const session = await desktopSession(app, "owner@example.test");
@@ -1908,11 +1911,13 @@ describe("API auth and private draft routes", () => {
     expect(created.statusCode).toBe(201);
     const url = `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`;
     expect((await app.inject({ method: "PATCH", url, headers, payload: { title: "Updated" } })).statusCode).toBe(428);
+    expect((await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
+      payload: { teamTag: "API", projectTag: "Arden" } })).statusCode).toBe(400);
     const updated = await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
-      payload: { title: "Updated", body: "v2", teamTag: "API", projectTag: "Arden" } });
+      payload: { title: "Updated", body: "v2" } });
     expect(updated.statusCode).toBe(200);
     expect(updated.headers.etag).toBe('"2"');
-    expect(updated.json()).toMatchObject({ title: "Updated", teamTag: "API", projectTag: "Arden",
+    expect(updated.json()).toMatchObject({ title: "Updated", teamTag: null, projectTag: null,
       currentVersion: { version: 2 } });
     expect(semanticDocumentText(updated.json().body)).toBe("v2");
     expect((await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
@@ -2244,7 +2249,7 @@ describe("API auth and private draft routes", () => {
         { scope: "ALL_READABLE", readers: organizationReaders, expected: 1 },
         { scope: "ALL_READABLE", readers: departmentReaders, expected: 1 },
         { scope: "ALL_READABLE", readers: selectedReaders, expected: 1 },
-        { scope: "ALL_READABLE", readers: null, expected: 1 },
+        { scope: "ALL_READABLE", readers: null, expected: 0 },
       ])("filters $scope by approved readers $readers, not responsible department", async ({ scope, readers, expected }) => {
         await publish(readers);
         const before = structuredClone(repository.publication);
@@ -2272,7 +2277,7 @@ describe("API auth and private draft routes", () => {
         expect((await read("?scope=ORGANIZATION")).map((item: { id: string }) => item.id)).toEqual([versionId]);
         expect((await read("?scope=SHARED")).map((item: { id: string }) => item.id)).toEqual([missingVersionId]);
         expect(await read("")).toEqual(await read("?scope=ALL_READABLE"));
-        expect(await read("")).toHaveLength(3);
+        expect(await read("")).toHaveLength(2);
         expect((await read("?scope=ORGANIZATION"))[0].management).toBeNull();
         expect(list).toHaveBeenCalledWith(ownerId, organizationId);
       });
@@ -2367,7 +2372,6 @@ describe("API auth and private draft routes", () => {
         departmentId: null, memberIds: [otherId, ownerId] } },
       { name: "any active member for Organization", readers: { mode: "ORGANIZATION" as const,
         departmentId: null, memberIds: [] } },
-      { name: "a legacy publication without readers", readers: null },
     ])("lets $name list, open and cite the document", async ({ readers }) => {
       await publish(readers);
       const headers = await ownerHeaders();

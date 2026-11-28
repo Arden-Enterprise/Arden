@@ -7,7 +7,7 @@ const row: CaseRecord = {
   caseId: "case", organizationId: "org", origin: "READER_REPORT", reporterMembershipId: "reporter",
   documentId: "doc", publishedVersionId: "ver", contentHash: "a".repeat(64), title: "IT Support Guide",
   description: "The restart step is wrong.", anchorPage: 3, anchorPassage: null, routeDepartmentId: "dept",
-  classification: "INTERNAL", teamTag: null, projectTag: null, authorMembershipId: "author",
+  classification: "INTERNAL", authorMembershipId: "author",
   assigneeMembershipId: null, reporterStatus: "Submitted", outcome: null, reporterExplanation: null,
   reviewerRationale: null, publicationLinkVersionId: null, publicationLinkSubmissionId: null,
   publicationLinkReason: null, revision: 1,

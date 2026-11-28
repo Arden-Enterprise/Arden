@@ -92,17 +92,14 @@ export type ReaderActor = {
 
 export type ReadablePublication = {
   organizationId: string;
-  /**
-   * The approved Target Readers of the publication. null means the publication predates Target Readers:
-   * it keeps today's audience behaviour, which the audience-aware publication query already applied.
-   */
+  /** A publication is readable only with an approved selection. */
   readers: ReaderSelection | null;
 };
 
 export function canRead(actor: ReaderActor | null, publication: ReadablePublication): boolean {
   if (!actor || actor.status !== "ACTIVE" || actor.organizationId !== publication.organizationId) return false;
   const readers = publication.readers;
-  if (readers === null) return true;
+  if (readers === null) return false;
   switch (readers.mode) {
     case "ORGANIZATION": return true;
     case "DEPARTMENT": return readers.departmentId !== null && actor.departmentIds.includes(readers.departmentId);

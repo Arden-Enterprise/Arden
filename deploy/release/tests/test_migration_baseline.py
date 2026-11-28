@@ -331,7 +331,8 @@ class MigrationBaselineTests(unittest.TestCase):
         maintenance = repair[repair.index("expected_maintenance_signatures text[] := ARRAY["):]
         maintenance = maintenance[:maintenance.index("];")]
         signatures = set(re.findall(r"'([^']+)'", maintenance))
-        self.assertEqual(len(signatures), 13)
+        self.assertEqual(len(signatures), 12)
+        self.assertIn("enqueue_maintenance_case_notice(uuid, uuid, uuid, text, text)", signatures)
         self.assertIn("list_closed_publication_reports()", signatures)
         self.assertIn("list_closed_publication_reports(uuid)", signatures)
 

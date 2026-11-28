@@ -873,25 +873,25 @@ export class PgSurfaceHydrator implements UiSurfaceHydrator {
     utcToday: string;
   } | null> {
     const result = await client.query<PgHydratorActorRow>(`
-      SELECT om.membership_id,
+      SELECT om.id AS membership_id,
              om.status,
              ARRAY(
                SELECT dm.department_id::text
                  FROM department_membership dm
                  JOIN department d
-                   ON d.department_id = dm.department_id
+                   ON d.id = dm.department_id
                   AND d.organization_id = om.organization_id
                   AND d.status = 'ACTIVE'
-                WHERE dm.membership_id = om.membership_id
+                WHERE dm.membership_id = om.id
                   AND dm.status = 'ACTIVE'
                 ORDER BY dm.department_id
              ) AS department_ids,
              maintenance_actor_is_admin($2) AS is_org_admin,
              to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS utc_today
-        FROM organization_membership om
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-       WHERE om.user_id = $1
+        FROM membership om
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+       WHERE om.account_id = $1
          AND om.organization_id = $2
          AND om.status = 'ACTIVE'`, [userId, organizationId]);
     const row = result.rows[0];
@@ -915,37 +915,37 @@ export class PgSurfaceHydrator implements UiSurfaceHydrator {
     actor: { readerActor: ReaderActor; isOrgAdmin: boolean; utcToday: string },
   ): Promise<PgHydratedDocRow[]> {
     const result = await client.query<PgHydratedDocRow>(`
-      SELECT pv.published_version_id,
-             pv.shared_draft_id AS document_id,
+      SELECT pv.id AS published_version_id,
+             pv.document_id AS document_id,
              pv.title,
-             pv.management,
-             pv.responsible_department_id AS owner_department_id,
+             pv.metadata AS management,
+             pv.owner_department_id AS owner_department_id,
              owner_department.name AS owner_department_name,
              pv.published_at,
-             kb.scope_type AS knowledge_base_scope_type,
-             cp.target_scope_type,
+             kb.scope AS knowledge_base_scope_type,
+             cp.target_scope AS target_scope_type,
              pv.index_status,
-             to_char(publication_expiration_date(pv.published_version_id, pv.management), 'YYYY-MM-DD') AS expiration_date,
-             pv.reader_selection_id AS readers_selection_id,
-             (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = pv.reader_selection_id) AS readers_mode,
-             (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = pv.reader_selection_id) AS readers_department_id,
+             to_char(publication_expiration_date(pv.id, pv.metadata), 'YYYY-MM-DD') AS expiration_date,
+             pv.reader_policy_id AS readers_selection_id,
+             (SELECT rs.mode AS reader_mode FROM reader_policy rs WHERE rs.id = pv.reader_policy_id) AS readers_mode,
+             (SELECT rs.department_id FROM reader_policy rs WHERE rs.id = pv.reader_policy_id) AS readers_department_id,
              ARRAY(
                SELECT sr.membership_id::text
-                 FROM selected_reader sr
-                WHERE sr.selection_id = pv.reader_selection_id
-                ORDER BY sr.ordinal
+                 FROM policy_reader sr
+                WHERE sr.reader_policy_id = pv.reader_policy_id
+                ORDER BY sr.position
              ) AS readers_member_ids,
-             (own_draft.shared_draft_id IS NOT NULL) AS is_author,
-             kc.collection_id,
+             (own_draft.id IS NOT NULL) AS is_author,
+             kc.id AS collection_id,
              kc.name AS collection_name,
-             maintenance_actor_can_review_version(pv.published_version_id) AS can_review_version,
+             maintenance_actor_can_review_version(pv.id) AS can_review_version,
              CASE
-               WHEN $3::boolean OR maintenance_actor_can_review_version(pv.published_version_id) THEN (
+               WHEN $3::boolean OR maintenance_actor_can_review_version(pv.id) THEN (
                  SELECT count(*)::integer
                    FROM maintenance_case mc
                   WHERE mc.organization_id = cp.organization_id
-                    AND mc.document_id = cp.shared_draft_id
-                    AND mc.published_version_id = pv.published_version_id
+                    AND mc.document_id = cp.document_id
+                    AND mc.published_version_id = pv.id
                     AND mc.reporter_status IN ('Submitted', 'In Progress')
                )
                ELSE NULL
@@ -953,54 +953,54 @@ export class PgSurfaceHydrator implements UiSurfaceHydrator {
              EXISTS (
                SELECT 1
                  FROM document_relationship dr
-                 JOIN knowledge_current_publication peer_cp
+                 JOIN current_publication peer_cp
                    ON peer_cp.organization_id = dr.organization_id
-                  AND peer_cp.shared_draft_id = CASE
-                        WHEN dr.source_document_id = cp.shared_draft_id THEN dr.target_document_id
+                  AND peer_cp.document_id = CASE
+                        WHEN dr.source_document_id = cp.document_id THEN dr.target_document_id
                         ELSE dr.source_document_id
                       END
                   AND peer_cp.valid_from <= now()
                   AND (peer_cp.valid_until IS NULL OR peer_cp.valid_until > now())
-                 JOIN published_knowledge_version peer_pv
-                   ON peer_pv.published_version_id = peer_cp.published_version_id
+                 JOIN published_version peer_pv
+                   ON peer_pv.id = peer_cp.published_version_id
                   AND peer_pv.published_at <= now()
                   AND (
-                    publication_expiration_date(peer_pv.published_version_id, peer_pv.management) IS NULL
-                    OR publication_expiration_date(peer_pv.published_version_id, peer_pv.management) >= (now() AT TIME ZONE 'UTC')::date
+                    publication_expiration_date(peer_pv.id, peer_pv.metadata) IS NULL
+                    OR publication_expiration_date(peer_pv.id, peer_pv.metadata) >= (now() AT TIME ZONE 'UTC')::date
                   )
                 WHERE dr.organization_id = cp.organization_id
-                  AND (dr.source_document_id = cp.shared_draft_id OR dr.target_document_id = cp.shared_draft_id)
+                  AND (dr.source_document_id = cp.document_id OR dr.target_document_id = cp.document_id)
              ) AS has_direct_relationships
-        FROM knowledge_current_publication cp
-        JOIN published_knowledge_version pv
-          ON pv.published_version_id = cp.published_version_id
-         AND pv.shared_draft_id = cp.shared_draft_id
+        FROM current_publication cp
+        JOIN published_version pv
+          ON pv.id = cp.published_version_id
+         AND pv.document_id = cp.document_id
         JOIN knowledge_base kb
-          ON kb.knowledge_base_id = pv.knowledge_base_id
+          ON kb.id = pv.knowledge_base_id
          AND kb.organization_id = cp.organization_id
         LEFT JOIN department owner_department
-          ON owner_department.department_id = pv.responsible_department_id
+          ON owner_department.id = pv.owner_department_id
          AND owner_department.organization_id = cp.organization_id
-        LEFT JOIN shared_draft own_draft
-          ON own_draft.shared_draft_id = cp.shared_draft_id
+        LEFT JOIN company_document own_draft
+          ON own_draft.id = cp.document_id
          AND own_draft.organization_id = cp.organization_id
-         AND own_draft.author_membership_id = $4
+         AND own_draft.author_id = $4
          AND own_draft.status = 'ACTIVE'
-        LEFT JOIN knowledge_collection_placement kcp
-          ON kcp.shared_draft_id = cp.shared_draft_id
+        LEFT JOIN handbook_placement kcp
+          ON kcp.document_id = cp.document_id
          AND kcp.organization_id = cp.organization_id
-        LEFT JOIN knowledge_collection kc
-          ON kc.collection_id = kcp.collection_id
+        LEFT JOIN handbook kc
+          ON kc.id = kcp.handbook_id
          AND kc.organization_id = cp.organization_id
          AND kc.status = 'ACTIVE'
        WHERE cp.organization_id = $1
-         AND pv.published_version_id = ANY($2::uuid[])
+         AND pv.id = ANY($2::uuid[])
          AND cp.valid_from <= now()
          AND (cp.valid_until IS NULL OR cp.valid_until > now())
          AND pv.published_at <= now()
          AND (
-           publication_expiration_date(pv.published_version_id, pv.management) IS NULL
-           OR publication_expiration_date(pv.published_version_id, pv.management) >= (now() AT TIME ZONE 'UTC')::date
+           publication_expiration_date(pv.id, pv.metadata) IS NULL
+           OR publication_expiration_date(pv.id, pv.metadata) >= (now() AT TIME ZONE 'UTC')::date
          )`, [organizationId, publishedVersionIds, actor.isOrgAdmin, actor.readerActor.membershipId]);
     return result.rows;
   }
@@ -1114,52 +1114,52 @@ export class PgSurfaceHydrator implements UiSurfaceHydrator {
     readerActor: ReaderActor,
   ): Promise<Map<string, SurfaceLineageEdgeRecord[]>> {
     const result = await client.query<PgLineageRow>(`
-      SELECT r.relationship_id,
+      SELECT r.id AS relationship_id,
              r.source_document_id,
              r.target_document_id,
-             r.relationship_type,
+             r.type AS relationship_type,
              src_cp.published_version_id AS source_published_version_id,
              src_pv.title AS source_title,
-             src_pv.management AS source_management,
-             src_pv.reader_selection_id AS source_readers_selection_id,
-             (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = src_pv.reader_selection_id) AS source_readers_mode,
-             (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = src_pv.reader_selection_id) AS source_readers_department_id,
-             ARRAY(SELECT sr.membership_id::text FROM selected_reader sr WHERE sr.selection_id = src_pv.reader_selection_id ORDER BY sr.ordinal) AS source_readers_member_ids,
+             src_pv.metadata AS source_management,
+             src_pv.reader_policy_id AS source_readers_selection_id,
+             (SELECT rs.mode AS reader_mode FROM reader_policy rs WHERE rs.id = src_pv.reader_policy_id) AS source_readers_mode,
+             (SELECT rs.department_id FROM reader_policy rs WHERE rs.id = src_pv.reader_policy_id) AS source_readers_department_id,
+             ARRAY(SELECT sr.membership_id::text FROM policy_reader sr WHERE sr.reader_policy_id = src_pv.reader_policy_id ORDER BY sr.position) AS source_readers_member_ids,
              tgt_cp.published_version_id AS target_published_version_id,
              tgt_pv.title AS target_title,
-             tgt_pv.management AS target_management,
-             tgt_pv.reader_selection_id AS target_readers_selection_id,
-             (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = tgt_pv.reader_selection_id) AS target_readers_mode,
-             (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = tgt_pv.reader_selection_id) AS target_readers_department_id,
-             ARRAY(SELECT sr.membership_id::text FROM selected_reader sr WHERE sr.selection_id = tgt_pv.reader_selection_id ORDER BY sr.ordinal) AS target_readers_member_ids
+             tgt_pv.metadata AS target_management,
+             tgt_pv.reader_policy_id AS target_readers_selection_id,
+             (SELECT rs.mode AS reader_mode FROM reader_policy rs WHERE rs.id = tgt_pv.reader_policy_id) AS target_readers_mode,
+             (SELECT rs.department_id FROM reader_policy rs WHERE rs.id = tgt_pv.reader_policy_id) AS target_readers_department_id,
+             ARRAY(SELECT sr.membership_id::text FROM policy_reader sr WHERE sr.reader_policy_id = tgt_pv.reader_policy_id ORDER BY sr.position) AS target_readers_member_ids
         FROM document_relationship r
-        JOIN knowledge_current_publication src_cp
+        JOIN current_publication src_cp
           ON src_cp.organization_id = r.organization_id
-         AND src_cp.shared_draft_id = r.source_document_id
+         AND src_cp.document_id = r.source_document_id
          AND src_cp.valid_from <= now()
          AND (src_cp.valid_until IS NULL OR src_cp.valid_until > now())
-        JOIN published_knowledge_version src_pv
-          ON src_pv.published_version_id = src_cp.published_version_id
+        JOIN published_version src_pv
+          ON src_pv.id = src_cp.published_version_id
          AND src_pv.published_at <= now()
          AND (
-           publication_expiration_date(src_pv.published_version_id, src_pv.management) IS NULL
-           OR publication_expiration_date(src_pv.published_version_id, src_pv.management) >= (now() AT TIME ZONE 'UTC')::date
+           publication_expiration_date(src_pv.id, src_pv.metadata) IS NULL
+           OR publication_expiration_date(src_pv.id, src_pv.metadata) >= (now() AT TIME ZONE 'UTC')::date
          )
-        JOIN knowledge_current_publication tgt_cp
+        JOIN current_publication tgt_cp
           ON tgt_cp.organization_id = r.organization_id
-         AND tgt_cp.shared_draft_id = r.target_document_id
+         AND tgt_cp.document_id = r.target_document_id
          AND tgt_cp.valid_from <= now()
          AND (tgt_cp.valid_until IS NULL OR tgt_cp.valid_until > now())
-        JOIN published_knowledge_version tgt_pv
-          ON tgt_pv.published_version_id = tgt_cp.published_version_id
+        JOIN published_version tgt_pv
+          ON tgt_pv.id = tgt_cp.published_version_id
          AND tgt_pv.published_at <= now()
          AND (
-           publication_expiration_date(tgt_pv.published_version_id, tgt_pv.management) IS NULL
-           OR publication_expiration_date(tgt_pv.published_version_id, tgt_pv.management) >= (now() AT TIME ZONE 'UTC')::date
+           publication_expiration_date(tgt_pv.id, tgt_pv.metadata) IS NULL
+           OR publication_expiration_date(tgt_pv.id, tgt_pv.metadata) >= (now() AT TIME ZONE 'UTC')::date
          )
        WHERE r.organization_id = $1
          AND (r.source_document_id = ANY($2::uuid[]) OR r.target_document_id = ANY($2::uuid[]))
-       ORDER BY r.created_at DESC, r.relationship_id ASC`, [organizationId, rootDocumentIds]);
+       ORDER BY r.created_at DESC, r.id ASC`, [organizationId, rootDocumentIds]);
 
     const rootSet = new Set(rootDocumentIds);
     const byRoot = new Map<string, SurfaceLineageEdgeRecord[]>();

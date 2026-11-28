@@ -33,15 +33,17 @@ Accepted policy: [decision 0009](../decisions/0009-custom-role-scope-and-owner-d
   private, stable document identity and per-document publication numbers.
 - Run API/UI/manual permission matrix; current rehearsal is deliberately narrower.
 
-## Manual verification tool
+## Historical manual verification tool
 
-Use `tools/roles/policy-rehearsal.sql` through the existing migration owner with
+For a disposable schema through migration `0085`, use `tools/roles/policy-rehearsal.sql` through the existing migration owner with
 `psql -X -v ON_ERROR_STOP=1 -P pager=off`. It creates only synthetic fixtures in one
 transaction and ends with ROLLBACK. Do not turn it into a reset script, run it against
 production, or disable the automatic integration suite's disposable-database fence.
 An assertion failure requires explicit ROLLBACK before further commands.
 Short statements can be entered individually in Coolify Terminal; long shell input may
 be truncated and must not be assumed executed. Verify COMMIT/ROLLBACK and migration records.
+
+From `0086` onward, use the Target Readers and repository integration suites with the runtime role. The manual fixture above exercises the former Audience policy.
 
 ## Current boundaries
 

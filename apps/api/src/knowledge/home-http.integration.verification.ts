@@ -226,14 +226,14 @@ export function registerHomeHttpVerification(context: () => Context) {
       const source = await publish({ mode: "SELECTED_MEMBERS", memberIds: [context().memberId, context().colleagueId] });
       await request(member, published(source.publication));
       const colleagueId = context().colleagueId;
-      duringAnswer = async () => { await pool.query("UPDATE arden.organization_membership SET status='SUSPENDED' WHERE membership_id=$1", [colleagueId]); };
+      duringAnswer = async () => { await pool.query("UPDATE arden.membership SET status='SUSPENDED' WHERE id=$1", [colleagueId]); };
       try {
         const rejected = await request(context().colleague, `${published(source.publication)}/questions`, 404, "POST", {
           requestId: randomUUID(), query: "How should I confirm access?" });
         expect(JSON.stringify(rejected.body)).not.toContain(text);
       } finally {
         duringAnswer = null;
-        await pool.query("UPDATE arden.organization_membership SET status='ACTIVE' WHERE membership_id=$1", [colleagueId]);
+        await pool.query("UPDATE arden.membership SET status='ACTIVE' WHERE id=$1", [colleagueId]);
       }
       await request(owner, published(source.publication), 404); // Admin is not an automatic reader.
       await request(colleague, published(source.publication));
@@ -269,7 +269,7 @@ export function registerHomeHttpVerification(context: () => Context) {
       expect([summaryCalls, retrievalCalls]).toEqual(deniedCounts);
       // A fresh publication avoids Summary cooldown without sleeping or changing policy.
       const inFlight = await publish({ mode: "SELECTED_MEMBERS", memberIds: [memberId, context().colleagueId] });
-      duringSummary = async () => { await pool.query("UPDATE arden.organization_membership SET status='SUSPENDED' WHERE membership_id=$1", [memberId]); };
+      duringSummary = async () => { await pool.query("UPDATE arden.membership SET status='SUSPENDED' WHERE id=$1", [memberId]); };
       try {
         const rejected = await request(member, `${published(inFlight.publication)}/summary`, 404, "POST", { requestId: randomUUID() });
         expect(JSON.stringify(rejected.body)).not.toContain(text);
@@ -279,7 +279,7 @@ export function registerHomeHttpVerification(context: () => Context) {
         await request(member, `${knowledge()}/published?scope=SHARED`, 404);
       } finally {
         duringSummary = null;
-        await pool.query("UPDATE arden.organization_membership SET status='ACTIVE' WHERE membership_id=$1", [memberId]);
+        await pool.query("UPDATE arden.membership SET status='ACTIVE' WHERE id=$1", [memberId]);
       }
       await request(member, published(source.publication));
       await request(member, "/api/v1/auth/sign-out", 204, "POST");

@@ -55,17 +55,18 @@ describe("organization administration fixes", () => {
     expect(within(table).queryByText("Member")).toBeNull();
   });
 
-  it("blocks the same reviewer scope and tags, but permits a different team tag", async () => {
+  it("blocks a duplicate reviewer scope and permits another scope", async () => {
     render(createElement(OrganizationAdminPage, { platform: "web", organizationId: "org",
       organizationName: "Example", contextOpen: false, onToggleContext: vi.fn() }));
     fireEvent.click(await screen.findByRole("tab", { name: /Review permissions/ }));
     fireEvent.change(screen.getByLabelText("Reviewer"), { target: { value: "reviewer" } });
     fireEvent.change(screen.getByLabelText("Department"), { target: { value: "department" } });
     expect((screen.getByRole("button", { name: "Assign reviewer" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Review permission already assigned for this scope and tags.")).toBeTruthy();
+    expect(screen.getByText("Review permission already assigned for this scope.")).toBeTruthy();
     fireEvent.submit(document.getElementById("admin-grant-form")!);
     expect(api.createReviewerGrant).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Team tag Optional"), { target: { value: "Operations" } });
+    expect(screen.queryByLabelText(/team tag|project tag/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Whole organization" }));
     expect((screen.getByRole("button", { name: "Assign reviewer" }) as HTMLButtonElement).disabled).toBe(false);
   });
 

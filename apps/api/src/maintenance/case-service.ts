@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type ActorRecord, type AnchorRecord, type CaseEventRecord, type CaseProjection, type CaseRecord,
-  type HistoryPage, type IntakeInput, type LegacyReport, type NotificationRecord, type PublicationSubmission, MaintenanceError, assertUuid, commandHash, intakeHash, legacyRequestKey,
+  type HistoryPage, type IntakeInput, type NotificationRecord, type PublicationSubmission, MaintenanceError, assertUuid, commandHash, intakeHash, legacyRequestKey,
 } from "./contracts.js";
 import { AnalysisRejectedError, maintenanceSourceTextLimit, type AnalysisAdapter, type AnalysisFinding, type AnalysisRun } from "./analysis.js";
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
@@ -34,9 +34,6 @@ export interface MaintenanceTx {
   membershipHasGrant(membershipId: string, row: CaseRecord): Promise<boolean>;
   lockReaderIntake(documentId: string, reporterMembershipId: string): Promise<void>;
   hasOpenReaderReport(documentId: string, reporterMembershipId: string): Promise<boolean>;
-  findImport(reportId: string): Promise<string | null>;
-  saveImport(reportId: string, caseId: string): Promise<void>;
-  unmappedOpenReports(after: { createdAt: string; reportId: string } | null): Promise<LegacyReport[]>;
   hasUnread(membershipId: string, caseId: string): Promise<boolean>;
   markRead(membershipId: string, caseId: string): Promise<void>;
   readVersionText(publishedVersionId: string): Promise<{ documentId: string; text: string | null } | null>;
@@ -114,7 +111,7 @@ export class MaintenanceCaseService {
         documentId: anchor.documentId, publishedVersionId: anchor.publishedVersionId, contentHash: anchor.contentHash,
         title: anchor.title, description, anchorPage: input.anchor?.page ?? null,
         anchorPassage: input.anchor?.passage?.trim() || null, routeDepartmentId: anchor.departmentId,
-        classification: anchor.classification, teamTag: anchor.teamTag, projectTag: anchor.projectTag,
+        classification: anchor.classification,
         authorMembershipId: anchor.authorMembershipId, assigneeMembershipId: null, reporterStatus: "Submitted",
         outcome: null, reporterExplanation: null, reviewerRationale: null, publicationLinkVersionId: null,
         publicationLinkSubmissionId: null, publicationLinkReason: null, revision: 1,
@@ -139,6 +136,8 @@ export class MaintenanceCaseService {
     return this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
       await tx.lockReaderIntake(input.documentId, actor.membershipId);
+      const anchor = await tx.readAnchor(input.documentId, input.publishedVersionId);
+      if (!anchor || anchor.organizationId !== organizationId) throw new MaintenanceError("DENIED");
       if (await tx.hasOpenReaderReport(input.documentId, actor.membershipId)) throw new MaintenanceError("CONFLICT");
       let keyMessage = message;
       let requestKey = legacyRequestKey(organizationId, actor.membershipId, input.documentId, input.publishedVersionId, keyMessage);
@@ -150,8 +149,6 @@ export class MaintenanceCaseService {
         requestKey = legacyRequestKey(organizationId, actor.membershipId, input.documentId, input.publishedVersionId, keyMessage);
         prior = await tx.idempotency(actor.membershipId, requestKey);
       }
-      const anchor = await tx.readAnchor(input.documentId, input.publishedVersionId);
-      if (!anchor || anchor.organizationId !== organizationId) throw new MaintenanceError("DENIED");
       const now = new Date().toISOString();
       const row = this.newCase(organizationId, anchor, {
         origin: "READER_REPORT", reporterMembershipId: actor.membershipId, description: message, createdAt: now,
@@ -169,79 +166,15 @@ export class MaintenanceCaseService {
     });
   }
 
-  importReports(userId: string, organizationId: string, reports: LegacyReport[]): Promise<{
-    imported: Array<{ reportId: string; caseId: string }>; retained: string[]; held: string[];
-  }> {
-    return this.port.transaction(userId, organizationId, async (tx) => {
-      const actor = await this.requireActor(tx, organizationId);
-      if (!(await tx.isAdmin())) throw new MaintenanceError("DENIED");
-      return this.importLoaded(tx, actor, organizationId, reports);
-    });
-  }
-
   importOpenReports(userId: string, organizationId: string): Promise<{
     imported: Array<{ reportId: string; caseId: string }>; retained: string[]; held: string[];
   }> {
-    const once = () => this.port.transaction(userId, organizationId, async (tx) => {
-      const actor = await this.requireActor(tx, organizationId);
+    return this.port.transaction(userId, organizationId, async (tx) => {
+      await this.requireActor(tx, organizationId);
       if (!(await tx.isAdmin())) throw new MaintenanceError("DENIED");
-      const result = { imported: [] as Array<{ reportId: string; caseId: string }>, retained: [] as string[], held: [] as string[] };
-      // Pages advance past held reports, so they cannot block later eligible ones.
-      for (let after: { createdAt: string; reportId: string } | null = null, page = 0; page < 50; page += 1) {
-        const reports = await tx.unmappedOpenReports(after);
-        const loaded = await this.importLoaded(tx, actor, organizationId, reports);
-        result.imported.push(...loaded.imported);
-        result.retained.push(...loaded.retained);
-        result.held.push(...loaded.held);
-        const last = reports.at(-1);
-        if (!last || reports.length < 200) break;
-        after = { createdAt: last.cursor ?? last.createdAt, reportId: last.reportId };
-      }
-      return result;
+      // The database migration imports all reports. Keep older clients' completion response.
+      return { imported: [], retained: [], held: [] };
     });
-    return once().catch((error: unknown) => {
-      if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "23505") throw error;
-      return once();
-    });
-  }
-
-  private async importLoaded(tx: MaintenanceTx, actor: ActorRecord, organizationId: string, reports: LegacyReport[]): Promise<{
-    imported: Array<{ reportId: string; caseId: string }>; retained: string[]; held: string[];
-  }> {
-      const imported: Array<{ reportId: string; caseId: string }> = [];
-      const retained: string[] = [];
-      const held: string[] = [];
-      for (const report of reports) {
-        assertUuid(report.reportId);
-        const existing = await tx.findImport(report.reportId);
-        if (existing) {
-          imported.push({ reportId: report.reportId, caseId: existing });
-          continue;
-        }
-        if (report.status === "CLOSED") {
-          retained.push(report.reportId);
-          continue;
-        }
-        const anchor = !report.verifiable ? null
-          : report.anchor !== undefined ? report.anchor : await tx.readAnchor(report.documentId, report.publishedVersionId);
-        if (!anchor || report.message.trim().length < 1) {
-          held.push(report.reportId);
-          continue;
-        }
-        const row = this.newCase(organizationId, anchor, {
-          origin: "READER_REPORT", reporterMembershipId: report.reporterMembershipId,
-          description: report.message.trim(), createdAt: report.createdAt,
-        });
-        await tx.insertCase(row);
-        await tx.insertEvent({
-          eventId: randomUUID(), organizationId, caseId: row.caseId, sequence: await tx.nextSequence(row.caseId),
-          actorMembershipId: actor.membershipId, eventType: "IMPORTED", audience: "PUBLIC",
-          message: "Imported from an existing report.", occurredAt: new Date().toISOString(),
-        });
-        await tx.saveImport(report.reportId, row.caseId);
-        imported.push({ reportId: report.reportId, caseId: row.caseId });
-      }
-      return { imported, retained, held };
   }
 
   listCases(userId: string, organizationId: string, scope: "mine" | "queue"): Promise<CaseProjection[]> {
@@ -781,8 +714,8 @@ export class MaintenanceCaseService {
       caseId: randomUUID(), organizationId, origin: input.origin, reporterMembershipId: input.reporterMembershipId,
       documentId: anchor.documentId, publishedVersionId: anchor.publishedVersionId, contentHash: anchor.contentHash,
       title: anchor.title, description: input.description, anchorPage: null, anchorPassage: null,
-      routeDepartmentId: anchor.departmentId, classification: anchor.classification, teamTag: anchor.teamTag,
-      projectTag: anchor.projectTag, authorMembershipId: anchor.authorMembershipId, assigneeMembershipId: null,
+      routeDepartmentId: anchor.departmentId, classification: anchor.classification,
+      authorMembershipId: anchor.authorMembershipId, assigneeMembershipId: null,
       reporterStatus: "Submitted", outcome: null, reporterExplanation: null, reviewerRationale: null,
       publicationLinkVersionId: null, publicationLinkSubmissionId: null, publicationLinkReason: null, revision: 1,
       firstClaimedAt: null, createdAt: input.createdAt, resolvedAt: null,

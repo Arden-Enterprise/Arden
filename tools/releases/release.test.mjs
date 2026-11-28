@@ -149,6 +149,28 @@ test("a blocked or malformed staging plan stops before any upload", async () => 
   }
 });
 
+test("the exact 54-table staging cutover can upload its verified pair but cannot activate", async () => {
+  const migration_inventory = Array.from({ length: 15 }, (_, index) => {
+    const id = String(78 + index).padStart(4, "0");
+    return { id, filename: `${id}_cutover.sql`, sha256: "d".repeat(64), rollout: "operator" };
+  });
+  const manifest = {
+    schema: 2, commit: environment.GITHUB_SHA, tree: "b".repeat(40), migration_inventory,
+    migrations: migrationInventory.fingerprintMigrationInventory(migration_inventory),
+    run_id: environment.GITHUB_RUN_ID, attempt: 1,
+  };
+  const migrationIds = migration_inventory.map(entry => entry.filename.slice(0, -4));
+  for (const pending of [migrationIds, migrationIds.slice(1)]) {
+    const calls = [];
+    await assert.rejects(() => release.executeStagingRelease(environment, manifest, "archive", async request => {
+      calls.push(request.op);
+      return request.op === "plan-migrations"
+        ? { status: "REQUIRES_OPERATOR", migration_ids: pending } : { status: "uploaded" };
+    }, async () => environment.GITHUB_SHA), { status: "REQUIRES_OPERATOR" });
+    assert.deepEqual(calls, pending === migrationIds ? ["plan-migrations", "upload"] : ["plan-migrations"]);
+  }
+});
+
 test("production plans against its own verified staging artifact then promotes without upload or rebuild", async () => {
   assert.ok(release, "Release client is not implemented");
   const main = { ...environment, GITHUB_REF_NAME: "main" };

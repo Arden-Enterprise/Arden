@@ -21,7 +21,20 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
         self.assertIn("0031_deduplicate_reviewer_grants.sql", migration_names)
         self.assertIn("0032_governed_ai_sources_and_conversations.sql", migration_names)
         self.assertIn("0074_system_admin_isolated_lifecycle.sql", migration_names)
-        self.assertEqual(self.paths[-1].name, "0077_graph_monitor_projection.sql")
+        self.assertIn("0077_graph_monitor_projection.sql", migration_names)
+        self.assertIn("0078_organization_direct_share_settings.sql", migration_names)
+        self.assertIn("0079_direct_share_setting_cutover.sql", migration_names)
+        self.assertIn("0080_retire_legacy_qa.sql", migration_names)
+        self.assertIn("0081_target_readers_authoring_cutover.sql", migration_names)
+        self.assertIn("0082_retire_legacy_categories_and_policies.sql", migration_names)
+        self.assertIn("0083_retire_legacy_audience_reads.sql", migration_names)
+        self.assertIn("0084_retire_legacy_system_administration.sql", migration_names)
+        self.assertIn("0085_consolidate_index_dispatch.sql", migration_names)
+        self.assertIn("0086_retire_audience_storage.sql", migration_names)
+        self.assertIn("0087_consolidate_maintenance_notifications.sql", migration_names)
+        self.assertIn("0088_consolidate_maintenance_reports.sql", migration_names)
+        self.assertIn("0089_retire_legacy_collection_links.sql", migration_names)
+        self.assertEqual(self.paths[-1].name, "0092_rename_schema_columns.sql")
         module.validate_migration_inventory(self.paths)
 
     def test_previous_inventory_missing_catalog_is_rejected(self):
@@ -32,7 +45,7 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
 
     def test_unreviewed_future_migration_is_rejected(self):
         with self.assertRaises(ValueError):
-            module.validate_migration_inventory(self.paths + [Path("0078_unreviewed.sql")])
+            module.validate_migration_inventory(self.paths + [Path("0082_unreviewed.sql")])
 
     def test_missing_or_duplicate_history_is_rejected(self):
         for paths in (self.paths[:10] + self.paths[11:],

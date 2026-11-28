@@ -903,6 +903,10 @@ function ArdenShellContent({ platform, graphIntentBus: injectedGraphIntentBus, r
       setKnowledgeCitationTarget(null);
       setRequestedContributionId(target.documentId);
       navigate("knowledge");
+    } else if (target.view === "reported-case" || target.view === "maintenance-case") {
+      showRoute(target.view === "reported-case"
+        ? { view: "knowledge", at: { kind: "report", caseId: target.caseId } }
+        : { view: "review-queue", at: { kind: "maintenance-case", caseId: target.caseId } });
     } else {
       setRequestedReviewId(null);
       setKnowledgeCitationTarget(target.publicationId ? {

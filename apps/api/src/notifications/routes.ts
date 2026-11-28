@@ -6,7 +6,7 @@ import { signNotificationReaderToken, type NotificationRealtimeConfiguration } f
 
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 const messages: Record<Exclude<NotificationType, "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
-  | "PUBLICATION_EXPIRING" | "PUBLICATION_RENEWAL_ON_BEHALF" | "DOCUMENT_SHARED_DIRECT">, string> = {
+  | "PUBLICATION_EXPIRING" | "PUBLICATION_RENEWAL_ON_BEHALF" | "DOCUMENT_SHARED_DIRECT" | "MAINTENANCE_CASE_UPDATED">, string> = {
   REVIEW_REQUESTED: "A knowledge item is waiting for your review.",
   REVIEW_APPROVED: "Your knowledge request was approved.",
   REVIEW_REJECTED: "Your knowledge request was rejected.",
@@ -118,6 +118,13 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
             const target = state?.isAuthor ? { view: "contribution", documentId: item.resourceId } : { view: "knowledge" };
             return { id: item.id, type: item.type, message, createdAt: item.createdAt, readAt: item.readAt,
               ...(visible ? { target } : {}) };
+          }
+          if (item.type === "MAINTENANCE_CASE_UPDATED") {
+            return { id: item.id, type: item.type, createdAt: item.createdAt, readAt: item.readAt,
+              message: item.maintenance?.message ?? "This notification's item is no longer available.",
+              ...(item.maintenance ? { target: {
+                view: item.maintenance.reporter ? "reported-case" : "maintenance-case", caseId: item.resourceId,
+              } } : {}) };
           }
           return { id: item.id, type: item.type, message: messages[item.type], createdAt: item.createdAt, readAt: item.readAt };
         }),

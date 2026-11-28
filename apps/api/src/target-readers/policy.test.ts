@@ -89,8 +89,8 @@ describe("TargetReaderPolicy.canRead", () => {
     expect(canRead(actor, { ...selected, readers: { ...selected.readers, memberIds: [] } })).toBe(false);
   });
 
-  it("keeps a publication without readers on the legacy audience path", () => {
-    expect(canRead(actor, { organizationId: "org", readers: null })).toBe(true);
+  it("denies a publication without a reader policy", () => {
+    expect(canRead(actor, { organizationId: "org", readers: null })).toBe(false);
   });
 
   it("denies inactive actors, missing actors and other organizations in every mode", () => {

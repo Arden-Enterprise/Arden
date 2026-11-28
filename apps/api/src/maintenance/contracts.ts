@@ -39,8 +39,6 @@ export type AnchorRecord = {
   title: string;
   classification: "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
   departmentId: string;
-  teamTag: string | null;
-  projectTag: string | null;
   authorMembershipId: string;
 };
 
@@ -58,8 +56,6 @@ export type CaseRecord = {
   anchorPassage: string | null;
   routeDepartmentId: string;
   classification: AnchorRecord["classification"];
-  teamTag: string | null;
-  projectTag: string | null;
   authorMembershipId: string;
   assigneeMembershipId: string | null;
   reporterStatus: ReporterStatus;
@@ -124,21 +120,6 @@ export class MaintenanceError extends Error {
 export function commandHash(parts: readonly string[]): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
-
-export type LegacyReport = {
-  reportId: string;
-  documentId: string;
-  publishedVersionId: string;
-  reporterMembershipId: string;
-  message: string;
-  createdAt: string;
-  status: "OPEN" | "CLOSED";
-  verifiable: boolean;
-  /** Routing facts of the original pin; it need not still be current. */
-  anchor?: AnchorRecord | null;
-  /** Full-precision paging position from the database. */
-  cursor?: string;
-};
 
 export function legacyRequestKey(organizationId: string, membershipId: string, documentId: string,
   publishedVersionId: string, message: string): string {

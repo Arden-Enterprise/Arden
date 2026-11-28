@@ -31,7 +31,6 @@ import { registerNotificationRoutes } from "./notifications/routes.js";
 import type { NotificationRealtimeConfiguration } from "./notifications/realtime.js";
 import { controlledAnalysisAdapter, httpAnalysisAdapter } from "./maintenance/analysis.js";
 import { MaintenanceCaseService } from "./maintenance/case-service.js";
-import { MaintenanceError } from "./maintenance/contracts.js";
 import { registerMaintenanceRoutes } from "./maintenance/routes.js";
 import { registerPrivateOrganizationRoutes, representNoteSummary, representPrivateNote } from "./private-notes/organization-routes.js";
 import { registerDirectShareRoutes } from "./private-notes/direct-share-routes.js";
@@ -84,7 +83,7 @@ type AppDependencies = {
 
 type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean;
   passwordSetupRequired?: boolean; sessionExpiresAt?: number };
-// Decision 0013: classification is optional and defaults to INTERNAL; review strictness comes from audience breadth.
+// Decision 0013: classification defaults to INTERNAL. Review scope follows the proposed readers.
 type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
@@ -1334,8 +1333,8 @@ export function buildApp(dependencies: AppDependencies) {
           classification: classificationSchema,
           responsibleDepartmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
           targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
-          teamTag: { type: ["string", "null"], maxLength: 100 },
-          projectTag: { type: ["string", "null"], maxLength: 100 },
+          teamTag: { type: "null" },
+          projectTag: { type: "null" },
           audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
           // Shape only; counts, duplicates and membership/department state are TargetReaderPolicy field errors.
           targetReaders: targetReadersSchema,
@@ -1633,23 +1632,6 @@ export function buildApp(dependencies: AppDependencies) {
           || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
-        if (dependencies.repository.maintenance) {
-          try {
-            const created = await new MaintenanceCaseService(dependencies.repository.maintenance)
-              .acceptLegacyReport(context.userId, organizationId, {
-                documentId: publication.draftId, publishedVersionId, message,
-              });
-            reply.header("Cache-Control", "no-store");
-            return reply.code(201).send({ id: created.caseId });
-          } catch (error) {
-            if (error instanceof MaintenanceError && error.code === "CONFLICT") {
-              return reply.code(409).send(safeError("ALREADY_REPORTED",
-                "You already reported this document. The responsible reviewers can see it.", request.id));
-            }
-            if (error instanceof MaintenanceError) return reply.code(404).send(resourceNotAvailable(request.id));
-            throw error;
-          }
-        }
         const result = await dependencies.repository.reportPublicationProblem(context.userId, organizationId,
           publication.draftId, publishedVersionId, message);
         if (result.kind === "duplicate") return reply.code(409).send(safeError("ALREADY_REPORTED",
@@ -1901,8 +1883,8 @@ export function buildApp(dependencies: AppDependencies) {
             classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
               items: classificationSchema },
             level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
-            teamTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
-            projectTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
+            teamTag: { type: "null" },
+            projectTag: { type: "null" },
             validUntil: { anyOf: [{ type: "string", maxLength: 40 }, { type: "null" }] },
           } },
       },
@@ -2065,7 +2047,7 @@ export function buildApp(dependencies: AppDependencies) {
         }
         if (result.reason === "READERS_NOT_SUPPORTED") {
           return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
-            "This submission uses audiences; approve it without approved readers.", request.id));
+            "This request has no proposed reader policy to adjust.", request.id));
         }
         if (result.reason === "AUTHOR_DECISION_WINDOW") {
           return reply.code(409).send(safeError("AUTHOR_DECISION_WINDOW",

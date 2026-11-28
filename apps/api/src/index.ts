@@ -116,8 +116,8 @@ async function checkRuntimeDatabase(): Promise<void> {
     await client.query("BEGIN");
     await client.query("SET LOCAL ROLE arden_runtime");
     await client.query("SET LOCAL search_path TO arden, public");
-    await client.query("SELECT 1 FROM user_account LIMIT 0");
-    await client.query("SELECT 1 FROM organization_membership LIMIT 0");
+    await client.query("SELECT 1 FROM account LIMIT 0");
+    await client.query("SELECT 1 FROM membership LIMIT 0");
     await client.query("ROLLBACK");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -134,8 +134,8 @@ async function checkNotificationDatabase(): Promise<void> {
     await client.query("BEGIN");
     await client.query("SET LOCAL ROLE arden_notification_worker");
     await client.query("SET LOCAL search_path TO arden, public");
-    await client.query("SELECT 1 FROM arden_notification_outbox LIMIT 0");
-    await client.query("SELECT 1 FROM arden_notification LIMIT 0");
+    await client.query("SELECT 1 FROM notification_outbox LIMIT 0");
+    await client.query("SELECT 1 FROM notification LIMIT 0");
     await client.query("ROLLBACK");
   } catch {
     await client.query("ROLLBACK").catch(() => undefined);

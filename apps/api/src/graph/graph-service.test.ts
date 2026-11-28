@@ -250,7 +250,7 @@ describe("GraphProjectionService", () => {
       title: "Legacy Policy",
       management: null,
       validUntil: null,
-      targetReaders: null,
+      targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
       knowledgeBaseScopeType: "ORGANIZATION",
       collection: {
         id: colLegacyId,
@@ -321,10 +321,7 @@ describe("GraphProjectionService", () => {
       readerScope: "SELECTED_MEMBERS",
       collectionId: null,
     });
-    expect(byId.get(docLegacyFallback.documentId as DocumentId)).toMatchObject({
-      readerScope: "LEGACY_AUDIENCE",
-      collectionId: null,
-    });
+    expect(byId.has(docLegacyFallback.documentId as DocumentId)).toBe(false);
     expect(byId.get(docInactiveCollection.documentId as DocumentId)).toMatchObject({
       readerScope: "ORGANIZATION",
       collectionId: null,

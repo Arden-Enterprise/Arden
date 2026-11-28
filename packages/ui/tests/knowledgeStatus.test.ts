@@ -27,9 +27,10 @@ describe("redesigned knowledge states", () => {
 
   it("distinguishes a published snapshot from a later working version", () => {
     expect(draftStatus(draft).label).toBe("Draft · Details needed");
-    expect(draftStatus({ ...draft, audienceIds: undefined as unknown as string[] }).label).toBe("Draft · Details needed");
+    expect(draftStatus({ ...draft, targetReaders: null }).label).toBe("Draft · Details needed");
     expect(draftStatus({ ...draft, responsibleDepartmentId: "dept" }).label).toBe("Draft · Details needed");
-    expect(draftStatus({ ...draft, responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT", audienceIds: ["audience"] }).label).toBe("Draft");
+    expect(draftStatus({ ...draft, responsibleDepartmentId: "dept",
+      targetReaders: { mode: "DEPARTMENT", departmentId: "dept", memberIds: [] } }).label).toBe("Draft");
     expect(draftStatus({ ...draft, hasPendingSubmission: true }, submission).label).toBe("Awaiting review");
     expect(draftStatus(draft, submission).label).toBe("Published");
     expect(draftStatus({ ...draft, versionId: "version-3" }, submission).label).toBe("Edited after publication");

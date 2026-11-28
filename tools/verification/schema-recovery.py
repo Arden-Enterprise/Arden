@@ -1,4 +1,4 @@
-"""Rehearse the publication reset, 0022-0077 forward upgrade and scoped restore on a disposable CI DB.
+"""Rehearse the publication reset, 0022-0092 forward upgrade and scoped restore on a disposable CI DB.
 
 This is verification, not a release/migration command. It accepts only the
 GitHub job's PostgreSQL service and creates its own unpredictable test database.
@@ -16,7 +16,7 @@ import uuid
 
 def validate_migration_inventory(migrations):
     """Keep this destructive disposable rehearsal bounded to reviewed history."""
-    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 78)]:
+    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 93)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
 
 
@@ -112,11 +112,17 @@ def main():
         except subprocess.CalledProcessError:
             assert snapshot() == before_reviewer_upgrade, "Failed reviewer upgrade changed baseline"
         sql(forward + "COMMIT;")
-        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"77"
+        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"92"
+        assert sql("SELECT count(*) FROM pg_tables WHERE schemaname IN ('arden','arden_system');").strip() == b"54"
+        assert sql("SELECT count(*) FROM information_schema.columns WHERE table_schema IN "
+                   "('arden','arden_system') AND (table_schema,table_name) IN "
+                   "(SELECT schemaname,tablename FROM pg_tables);").strip() == b"524"
+        assert sql("SELECT to_regclass('arden.audience') IS NULL AND "
+                   "to_regclass('arden.shared_submission') IS NULL;").strip() == b"t"
         assert sql("SELECT name FROM arden.knowledge_base;").strip() == b"Preserve on reviewer upgrade"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
         assert sql("SELECT column_default FROM information_schema.columns "
-                   "WHERE table_schema='arden' AND table_name='shared_submission' "
+                   "WHERE table_schema='arden' AND table_name='review_submission' "
                    "AND column_name='review_rule';").strip() == b"'GRANT_SCOPE'::text"
         # Recover only Arden and its ledger, keeping the external service probe.
         restore = docker("exec", "-i", container, "pg_restore", "--file=-", data=backup)
@@ -127,7 +133,7 @@ def main():
         assert sql("SELECT value FROM public.outside_restore_boundary;").strip() == b"preserve-external-service"
         assert sql("SELECT to_regclass('arden.knowledge_index_generation') IS NULL;").strip() == b"t"
         assert sql("SELECT count(*) FROM pg_trigger WHERE tgname='trg_audit_event_append_only';").strip() == b"1"
-        print("PASS: atomic reset/forward failures, populated 0021->0077 upgrade, "
+        print("PASS: atomic reset/forward failures, populated 0021->0092 upgrade, "
               "exact table/ledger restore, external boundary preserved")
     finally:
         docker("exec", container, "dropdb", "-U", "postgres", database)

@@ -116,9 +116,21 @@ export async function executeStagingRelease(env, manifest, archive, send, getHea
     || manifest.commit !== context.commit || manifest.run_id !== context.run_id
     || manifest.attempt !== context.attempt) throw new Error("Staging release identity is invalid");
   await assertCurrentHead(env, getHead);
-  await planMigrationsWithRecovery(env, manifest, send, getHead);
+  let operatorBlock;
+  try {
+    await planMigrationsWithRecovery(env, manifest, send, getHead);
+  } catch (error) {
+    if (error?.code !== "ARDEN_MIGRATION_BLOCKED" || error.status !== "REQUIRES_OPERATOR") throw error;
+    // Physical renames require the old API to stop before migration. Stage the
+    // verified pair for this exact cutover without authorizing its activation.
+    const cutover = manifest.migration_inventory.filter(entry => entry.rollout === "operator"
+      && Number(entry.id) >= 78 && Number(entry.id) <= 92).map(entry => entry.filename.slice(0, -4));
+    if (cutover.length !== 15 || error.migrationIds.join("\0") !== cutover.join("\0")) throw error;
+    operatorBlock = error;
+  }
   await assertCurrentHead(env, getHead);
   await send({ op: "upload", environment: "staging", manifest }, archive);
+  if (operatorBlock) throw operatorBlock;
   await assertCurrentHead(env, getHead);
   return send({ op: "deploy", environment: "staging", manifest });
 }

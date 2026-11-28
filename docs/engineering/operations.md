@@ -250,6 +250,8 @@ Reference: [Coolify Compose deployments](https://coolify.io/docs/applications/bu
 
 ## 6. Release promotion, migrations, and compatibility
 
+See the [54-table migration plan](schema-54-migration-plan.md) for rehearsal of operator migrations `0078`–`0092`. These migrations retire legacy relations and rename physical tables and columns. Stop the previous Core and worker processes before the cutover, rehearse on a disposable restore of the target database, and run the full runtime checks after transferring ownership. The trusted `arden` SECURITY DEFINER inventory contains 54 routines after `0092`.
+
 - Build an immutable release artifact once, deploy it to staging, and promote the same verified digest to production after applicable checks. Use environment-specific runtime config/secrets, not a silent second build.
 - A deployment request does not authorize arbitrary customer/schema changes. Confirm target, version, required secrets, maintenance expectations, and data-loss implications before execution.
 - Run reviewed migrations **once** with locking/serialization under an appropriate migration role. Do not race multiple API/worker startup migrations or use schema push on staging/production.

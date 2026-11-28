@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "../db/repository.js";
 import { prepareKnowledgeFixture } from "../db/knowledge-fixture.test-support.js";
 import { canRead } from "./policy.js";
+import { MaintenanceCaseService } from "../maintenance/case-service.js";
 
 // Flow 2 T1.1/T1.3/T1.4 against real PostgreSQL. Cleanup disables user triggers and holds
 // SHARE ROW EXCLUSIVE locks until commit. vitest.config.ts runs API files one at a time when
@@ -14,7 +15,7 @@ const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) :
 const repository = pool ? new ArdenRepository(pool) : null;
 const id = () => randomUUID();
 const ids = {
-  orgA: id(), orgB: id(), scopeA: id(), allMembersA: id(),
+  orgA: id(), orgB: id(), scopeA: id(),
   author: id(), reviewer: id(), engineer: id(), outsider: id(), suspended: id(), foreign: id(),
   authorM: id(), reviewerM: id(), engineerM: id(), outsiderM: id(), suspendedM: id(), foreignM: id(),
   sales: id(), engineering: id(), archived: id(), departmentB: id(),
@@ -86,14 +87,14 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     if (shareNotifications.rowCount !== 1) throw new Error("Apply migration 0061 to the isolated test database first");
 
     await asSuperuser(async (client) => {
-      await client.query(`INSERT INTO organization (organization_id, name, slug)
+      await client.query(`INSERT INTO organization (id, name, slug)
         VALUES ($1, 'Readers A', $2), ($3, 'Readers B', $4)`,
       [ids.orgA, `readers-a-${ids.orgA}`, ids.orgB, `readers-b-${ids.orgB}`]);
       for (const userId of userIds) {
-        await client.query(`INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, 'Synthetic reader')`,
+        await client.query(`INSERT INTO account (id, email, full_name) VALUES ($1, $2, 'Synthetic reader')`,
           [userId, `${userId}@example.test`]);
       }
-      await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id, status)
+      await client.query(`INSERT INTO membership (id, organization_id, account_id, status)
         VALUES ($1, $7, $8, 'ACTIVE'), ($2, $7, $9, 'ACTIVE'), ($3, $7, $10, 'ACTIVE'), ($4, $7, $11, 'ACTIVE'),
                ($5, $7, $12, 'SUSPENDED'), ($6, $13, $14, 'ACTIVE')`,
       [ids.authorM, ids.reviewerM, ids.engineerM, ids.outsiderM, ids.suspendedM, ids.foreignM,
@@ -105,25 +106,18 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         [ids.departmentB, ids.departmentBRole, ids.orgB, "B", "ACTIVE"],
       ];
       for (const [departmentId, roleId, organizationId, code, status] of departments) {
-        await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, $3)`,
+        await client.query(`INSERT INTO role (id, organization_id, code, name) VALUES ($1, $2, $3, $3)`,
           [roleId, organizationId, `READERS_${code}_${roleId.replaceAll("-", "").toUpperCase()}`]);
-        await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id, status)
+        await client.query(`INSERT INTO department (id, organization_id, code, name, default_role_id, status)
           VALUES ($1, $2, $3, $3, $4, $5)`, [departmentId, organizationId, code, roleId, status]);
       }
       await client.query(`INSERT INTO department_membership (membership_id, department_id, is_primary)
         VALUES ($1, $5, true), ($2, $5, true), ($3, $6, true), ($4, $5, true)`,
       [ids.authorM, ids.reviewerM, ids.engineerM, ids.outsiderM, ids.sales, ids.engineering]);
-      await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`,
+      await client.query(`INSERT INTO access_scope (id, organization_id, scope) VALUES ($1, $2, 'ORGANIZATION')`,
         [ids.scopeA, ids.orgA]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.authorM, ids.scopeA]);
-      // Legacy audience path: every active member passes publication RLS, so Target Readers decide.
-      await client.query(`INSERT INTO role (role_id, organization_id, code, name)
-        VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone in organization')`, [ids.allMembersA, ids.orgA]);
-      await client.query(`INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`, [ids.allMembersA]);
-      await client.query(`INSERT INTO audience (audience_id, organization_id, kind, name, is_managed, legacy_role_id)
-        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization', true, $1)`, [ids.allMembersA, ids.orgA]);
+        SELECT $1, id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.authorM, ids.scopeA]);
     });
     fixtureReady = true;
   });
@@ -138,44 +132,41 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
           await client.query("SET LOCAL session_replication_role = replica");
           const orgs = [ids.orgA, ids.orgB];
           await client.query("DELETE FROM audit_event WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM publication_report WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM governance_inspection WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM arden_notification WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM document_relationship_idempotency WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM case_event WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM case_intake_key WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM maintenance_case WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM inspection WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM notification WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM relationship_request_key WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM document_relationship WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM publication_validity_renewal WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM publication_renewal WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
           // Change requests reference a published version; remove them before the publications.
-          await client.query(`DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission
+          await client.query(`DELETE FROM review_decision WHERE review_submission_id IN (SELECT id AS submission_id FROM review_submission
             WHERE organization_id = ANY($1::uuid[]) AND request_type <> 'CONTENT')`, [orgs]);
-          await client.query(`DELETE FROM shared_submission WHERE organization_id = ANY($1::uuid[])
+          await client.query(`DELETE FROM review_submission WHERE organization_id = ANY($1::uuid[])
             AND request_type <> 'CONTENT'`, [orgs]);
-          await client.query(`DELETE FROM published_knowledge_version WHERE submission_id IN
-            (SELECT submission_id FROM shared_submission WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
-          await client.query(`DELETE FROM knowledge_index_job WHERE generation_id IN
-            (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
-          await client.query("DELETE FROM knowledge_index_generation WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query(`DELETE FROM review_decision WHERE submission_id IN
-            (SELECT submission_id FROM shared_submission WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
-          await client.query("DELETE FROM shared_submission WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query(`DELETE FROM published_version WHERE review_submission_id IN
+            (SELECT id AS submission_id FROM review_submission WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
+          await client.query("DELETE FROM index_generation WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query(`DELETE FROM review_decision WHERE review_submission_id IN
+            (SELECT id AS submission_id FROM review_submission WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
+          await client.query("DELETE FROM review_submission WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM knowledge_base WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query(`DELETE FROM shared_draft_version WHERE shared_draft_id IN
-            (SELECT shared_draft_id FROM shared_draft WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
-          await client.query("DELETE FROM shared_draft_audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM shared_draft WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM selected_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM reader_selection WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query(`DELETE FROM working_version WHERE document_id IN
+            (SELECT id AS shared_draft_id FROM company_document WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
+          await client.query("DELETE FROM company_document WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM policy_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM reader_policy WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])", [membershipIdsA]);
           await client.query(`DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])`, [membershipIdsA]);
-          await client.query("DELETE FROM organization_membership WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM membership WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM department WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM role_permission WHERE role_id = $1", [ids.allMembersA]);
           await client.query("DELETE FROM role WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM access_scope WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [userIds]);
-          await client.query("DELETE FROM organization WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM account WHERE id = ANY($1::uuid[])", [userIds]);
+          await client.query("DELETE FROM organization WHERE id = ANY($1::uuid[])", [orgs]);
         });
         break;
       } catch (error) {
@@ -188,10 +179,10 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
 
   describe("T1.1 schema", () => {
     const insertSelection = (client: PoolClient, mode: string, departmentId: string | null, organizationId = ids.orgA) =>
-      client.query<{ selection_id: string }>(`INSERT INTO reader_selection (organization_id, reader_mode, department_id)
-        VALUES ($1, $2, $3) RETURNING selection_id`, [organizationId, mode, departmentId]).then(r => r.rows[0]!.selection_id);
+      client.query<{ selection_id: string }>(`INSERT INTO reader_policy (organization_id, mode, department_id)
+        VALUES ($1, $2, $3) RETURNING id AS selection_id`, [organizationId, mode, departmentId]).then(r => r.rows[0]!.selection_id);
     const addReader = (client: PoolClient, selectionId: string, membershipId: string, ordinal: number, organizationId = ids.orgA) =>
-      client.query(`INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+      client.query(`INSERT INTO policy_reader (reader_policy_id, organization_id, membership_id, position)
         VALUES ($1, $2, $3, $4)`, [selectionId, organizationId, membershipId, ordinal]);
 
     it("blocks DEPARTMENT without department_id and a department with another mode (CHECK)", async () => {
@@ -239,9 +230,9 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         return selectionId;
       });
       await expect(sqlState((client) => addReader(client, saved, ids.outsiderM, 3))).resolves.toBe("55000");
-      await expect(sqlState((client) => client.query(`UPDATE reader_selection SET reader_mode = 'ORGANIZATION'
-        WHERE selection_id = $1`, [saved]))).resolves.toBe("55000");
-      await expect(sqlState((client) => client.query(`DELETE FROM selected_reader WHERE selection_id = $1`, [saved])))
+      await expect(sqlState((client) => client.query(`UPDATE reader_policy SET mode = 'ORGANIZATION'
+        WHERE id = $1`, [saved]))).resolves.toBe("55000");
+      await expect(sqlState((client) => client.query(`DELETE FROM policy_reader WHERE reader_policy_id = $1`, [saved])))
         .resolves.toBe("55000");
     });
 
@@ -254,23 +245,23 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         return [a, b];
       });
       const fromB = await asRuntime(ids.foreign, ids.orgB, async (client) => ({
-        selections: (await client.query(`SELECT selection_id FROM reader_selection WHERE selection_id = ANY($1::uuid[])`,
+        selections: (await client.query(`SELECT id AS selection_id FROM reader_policy WHERE id = ANY($1::uuid[])`,
           [[selectionA, selectionB]])).rows.map(row => row.selection_id),
-        readers: (await client.query(`SELECT 1 FROM selected_reader WHERE selection_id = $1`, [selectionA])).rowCount,
+        readers: (await client.query(`SELECT 1 FROM policy_reader WHERE reader_policy_id = $1`, [selectionA])).rowCount,
         facts: (await client.query(`SELECT * FROM reader_selection_member_facts($1::uuid[])`, [[ids.authorM]])).rowCount,
       }));
       expect(fromB).toEqual({ selections: [selectionB], readers: 0, facts: 0 });
       // Pretending to be in organization A while being a member of B does not help.
       const spoofed = await asRuntime(ids.foreign, ids.orgA, async (client) =>
-        (await client.query(`SELECT 1 FROM reader_selection WHERE selection_id = $1`, [selectionA])).rowCount);
+        (await client.query(`SELECT 1 FROM reader_policy WHERE id = $1`, [selectionA])).rowCount);
       expect(spoofed).toBe(0);
-      await expect(asRuntime(ids.foreign, ids.orgB, (client) => client.query(`INSERT INTO reader_selection
-        (organization_id, reader_mode) VALUES ($1, 'ORGANIZATION')`, [ids.orgA]))).rejects.toMatchObject({ code: "42501" });
+      await expect(asRuntime(ids.foreign, ids.orgB, (client) => client.query(`INSERT INTO reader_policy
+        (organization_id, mode) VALUES ($1, 'ORGANIZATION')`, [ids.orgA]))).rejects.toMatchObject({ code: "42501" });
       const fromA = await asRuntime(ids.outsider, ids.orgA, async (client) =>
-        (await client.query(`SELECT 1 FROM selected_reader WHERE selection_id = $1`, [selectionA])).rowCount);
+        (await client.query(`SELECT 1 FROM policy_reader WHERE reader_policy_id = $1`, [selectionA])).rowCount);
       expect(fromA).toBe(2);
-      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(`UPDATE reader_selection
-        SET revision = 2 WHERE selection_id = $1`, [selectionA]))).rejects.toMatchObject({ code: "42501" });
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(`UPDATE reader_policy
+        SET revision = 2 WHERE id = $1`, [selectionA]))).rejects.toMatchObject({ code: "42501" });
     });
   });
 
@@ -305,7 +296,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toMatchObject({ targetReaders: selected, currentVersion: 2 });
 
       const configured = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 2, {
-        responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
+        responsibleDepartmentId: ids.sales,
         targetReaders: { mode: "DEPARTMENT", departmentId: ids.engineering },
       }, null, "readers-configure");
       const department = { mode: "DEPARTMENT", departmentId: ids.engineering, memberIds: [] };
@@ -315,19 +306,22 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const submitted = await repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 3, randomUUID(), "readers-submit");
       expect(submitted).toMatchObject({ kind: "submitted", submission: { proposedTargetReaders: department } });
       if (submitted.kind !== "submitted") return;
+      const routing = await asSuperuser((client) => client.query(`SELECT target_scope AS target_scope_type, owner_department_id AS responsible_department_id
+        FROM review_submission WHERE id = $1`, [submitted.submission.id]));
+      expect(routing.rows).toEqual([{ target_scope_type: "DEPARTMENT", responsible_department_id: ids.sales }]);
       // Drafts stay editable while a snapshot is pending (decision 0011); the submitted readers do not change.
       await expect(save(3, { mode: "ORGANIZATION" })).resolves.toMatchObject({ kind: "updated",
         draft: { targetReaders: { mode: "ORGANIZATION" } } });
       const pending = await repository.listKnowledgeSubmissions(ids.author, ids.orgA);
       expect(pending?.find((item) => item.id === submitted.submission.id)?.proposedTargetReaders).toEqual(department);
-      await expect(sqlState((client) => client.query(`UPDATE shared_submission SET proposed_selection_id = NULL
-        WHERE submission_id = $1`, [submitted.submission.id]))).resolves.toBe("55000");
+      await expect(sqlState((client) => client.query(`UPDATE review_submission SET proposed_reader_policy_id = NULL
+        WHERE id = $1`, [submitted.submission.id]))).resolves.toBe("55000");
       // Approved readers are recorded only by an approval decision, and only once (0025).
       await expect(sqlState(async (client) => {
-        await client.query(`UPDATE shared_submission SET approved_selection_id = proposed_selection_id
-          WHERE submission_id = $1`, [submitted.submission.id]);
-        await client.query(`UPDATE shared_submission SET approved_selection_id = NULL
-          WHERE submission_id = $1`, [submitted.submission.id]);
+        await client.query(`UPDATE review_submission SET approved_reader_policy_id = proposed_reader_policy_id
+          WHERE id = $1`, [submitted.submission.id]);
+        await client.query(`UPDATE review_submission SET approved_reader_policy_id = NULL
+          WHERE id = $1`, [submitted.submission.id]);
       })).resolves.toBe("55000");
     });
 
@@ -354,12 +348,12 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     return created.draft.id;
   };
 
-  /** A pending submission with canonical intake fields and the fixture's legacy review projection. */
-  const submitLegacyDraft = async (title: string) => {
+  /** A pending submission restricted to the author and engineer. */
+  const submitSelectedDraft = async (title: string) => {
     if (!repository) throw new Error("Test database is unavailable");
     const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, title);
     const configured = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 1, {
-      responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
+      responsibleDepartmentId: ids.sales,
     }, null, "flow2-configure");
     if (configured.kind !== "updated") throw new Error(`Configure fixture failed: ${configured.kind}`);
     await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.authorM, ids.engineerM]);
@@ -368,52 +362,22 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     return { draftId, submissionId: submitted.submission.id };
   };
 
-  describe("T3.1 categories, document metadata and relationships (migration 0027)", () => {
-    it("gives a new organization the five default categories, including one created by the runtime role", async () => {
+  describe("Document metadata and relationships", () => {
+    it("creates an organization without the retired category catalog and validates keywords", async () => {
       const organizationId = id();
-      const codes = await asRuntime(ids.outsider, "", async (client) => {
-        await client.query("SELECT set_config('arden.organization_id', '', true)");
-        await client.query(`INSERT INTO organization (organization_id, name, slug, created_by_user_id)
-          VALUES ($1, 'Category fixture', $2, $3)`, [organizationId, `category-${organizationId}`, ids.outsider]);
-        await client.query("RESET ROLE");
-        return (await client.query<{ code: string; is_default: boolean }>(`SELECT code, is_default
-          FROM document_category WHERE organization_id = $1 ORDER BY sort_order`, [organizationId])).rows;
-      });
-      expect(codes).toEqual([
-        { code: "POLICY", is_default: false }, { code: "PROCEDURE", is_default: false },
-        { code: "GUIDE", is_default: false }, { code: "REFERENCE", is_default: false },
-        { code: "GENERAL", is_default: true }]);
-      const fixtureOrganizations = await asSuperuser((client) => client.query<{ organization_id: string; categories: string }>(`
-        SELECT o.organization_id, count(c.category_id)::text AS categories FROM organization o
-          LEFT JOIN document_category c ON c.organization_id = o.organization_id
-         WHERE o.organization_id = ANY($1::uuid[]) GROUP BY o.organization_id`, [[ids.orgA, ids.orgB]]));
-      expect(fixtureOrganizations.rows.map((row) => row.categories)).toEqual(["5", "5"]);
-    });
-
-    it("leaves no document that existed before 0027 without a category", async () => {
-      const missing = await asSuperuser((client) => client.query(`SELECT d.shared_draft_id FROM shared_draft d
-        JOIN public.arden_schema_migrations m ON m.migration_id = '0027_document_category_relationships'
-       WHERE d.created_at < m.applied_at AND d.category_id IS NULL`));
-      expect(missing.rowCount).toBe(0);
-    });
-
-    it("lets members read only their organization's categories and validates keywords", async () => {
-      const visible = await asRuntime(ids.engineer, ids.orgA, (client) => client.query<{ organization_id: string }>(
-        "SELECT DISTINCT organization_id FROM document_category"));
-      expect(visible.rows).toEqual([{ organization_id: ids.orgA }]);
-      await expect(asRuntime(ids.engineer, ids.orgB, (client) => client.query("SELECT 1 FROM document_category")))
-        .resolves.toMatchObject({ rowCount: 0 });
+      await asRuntime(ids.outsider, "", (client) => client.query(`INSERT INTO organization
+        (id, name, slug, created_by_account_id)
+        VALUES ($1, 'Metadata fixture', $2, $3)`, [organizationId, `metadata-${organizationId}`, ids.outsider]));
+      const catalogs = await asSuperuser((client) => client.query(`SELECT
+        to_regclass('arden.document_category') AS category, to_regclass('arden.authorization_policy') AS policy`));
+      expect(catalogs.rows).toEqual([{ category: null, policy: null }]);
       const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, "Keyword fixture");
       for (const keywords of [["  padded"], ["dup", "DUP"], [""], Array.from({ length: 21 }, (_, n) => `k${n}`)]) {
-        await expect(sqlState((client) => client.query("UPDATE shared_draft SET keywords = $2 WHERE shared_draft_id = $1",
+        await expect(sqlState((client) => client.query("UPDATE company_document SET keywords = $2 WHERE id = $1",
           [draftId, keywords]))).resolves.toBe("23514");
       }
-      await expect(sqlState((client) => client.query(`UPDATE shared_draft SET keywords = $2,
-        category_id = (SELECT category_id FROM document_category WHERE organization_id = $3 AND code = 'POLICY')
-        WHERE shared_draft_id = $1`, [draftId, ["onboarding", "VPN"], ids.orgA]))).resolves.toBeNull();
-      await expect(sqlState((client) => client.query(`UPDATE shared_draft SET
-        category_id = (SELECT category_id FROM document_category WHERE organization_id = $2 AND code = 'POLICY')
-        WHERE shared_draft_id = $1`, [draftId, ids.orgB]))).resolves.toBe("23503");
+      await expect(sqlState((client) => client.query("UPDATE company_document SET keywords = $2 WHERE id = $1",
+        [draftId, ["onboarding", "VPN"]]))).resolves.toBeNull();
     });
 
     it("links published documents of one organization only, enforces dual-endpoint RLS, and allows ghost-edge cleanup (0072)", async () => {
@@ -432,7 +396,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         const selectionId = id();
         await asSuperuser(async (client) => {
           await client.query(
-            `INSERT INTO reader_selection (selection_id, organization_id, reader_mode, department_id)
+            `INSERT INTO reader_policy (id, organization_id, mode, department_id)
              VALUES ($1, $2, $3, NULL)`,
             [selectionId, ids.orgA, options.readerMode ?? "ORGANIZATION"],
           );
@@ -440,16 +404,16 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
             const members = options.selectedMembers ?? [ids.authorM, ids.engineerM];
             for (let i = 0; i < members.length; i += 1) {
               await client.query(
-                `INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+                `INSERT INTO policy_reader (reader_policy_id, organization_id, membership_id, position)
                  VALUES ($1, $2, $3, $4)`,
                 [selectionId, ids.orgA, members[i], i + 1],
               );
             }
           }
           const kb = await client.query<{ knowledge_base_id: string }>(
-            `INSERT INTO knowledge_base (organization_id, name, scope_type)
+            `INSERT INTO knowledge_base (organization_id, name, scope)
              VALUES ($1, 'Link fixture ' || $2, 'ORGANIZATION')
-             RETURNING knowledge_base_id`,
+             RETURNING id AS knowledge_base_id`,
             [ids.orgA, draftId],
           );
           const management = options.expirationDate !== undefined
@@ -462,47 +426,47 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
             : null;
           await client.query("SET LOCAL session_replication_role = replica");
           await client.query(
-            `INSERT INTO shared_draft_version (shared_draft_version_id, shared_draft_id, version_no, content_uri, mime_type, content_hash)
+            `INSERT INTO working_version (id, document_id, version_no, file_uri, mime_type, content_hash)
              VALUES ($1, $2, 2, $3, 'text/plain', $4)`,
             [draftVersionId, draftId, `arden-private-object://${draftId}`, "d".repeat(64)],
           );
           await client.query(
-            `INSERT INTO shared_submission (
-               submission_id, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
-               submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id,
-               title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
-               content_hash, status, publication_state, submit_request_id, proposed_selection_id, approved_selection_id, management
+            `INSERT INTO review_submission (
+               id, organization_id, document_id, working_version_id, snapshot_version_no,
+               submitted_by_id, target_scope, target_department_id, owner_department_id,
+               title, classification, policy_version, review_rule, file_uri, mime_type,
+               content_hash, status, publication_state, submit_request_id, proposed_reader_policy_id, approved_reader_policy_id, metadata
              ) VALUES (
-               $1, $2, $3, $4, 2, $5, 'ORGANIZATION', NULL, $6, $7, 'INTERNAL', $8::uuid[], 1, 'GRANT_SCOPE',
-               $9, 'text/plain', $10, 'APPROVED', 'ACTIVE', gen_random_uuid(), $11, $11, $12::jsonb
+               $1, $2, $3, $4, 2, $5, 'ORGANIZATION', NULL, $6, $7, 'INTERNAL', 1, 'GRANT_SCOPE',
+               $8, 'text/plain', $9, 'APPROVED', 'ACTIVE', gen_random_uuid(), $10, $10, $11::jsonb
              )`,
             [
               submissionId, ids.orgA, draftId, draftVersionId, ids.authorM, ids.sales, title,
-              [ids.allMembersA], `arden-private-object://${draftId}`, "d".repeat(64), selectionId, management,
+              `arden-private-object://${draftId}`, "d".repeat(64), selectionId, management,
             ],
           );
           await client.query(
-            `INSERT INTO published_knowledge_version (
-               published_version_id, submission_id, knowledge_base_id, published_by_membership_id,
-               title, version_no, content_uri, content_hash, index_status, published_at,
-               shared_draft_id, classification, responsible_department_id, audience_role_ids,
-               valid_from, reader_selection_id, management, author_membership_id
+            `INSERT INTO published_version (
+               id, review_submission_id, knowledge_base_id, published_by_id,
+               title, version_no, file_uri, content_hash, index_status, published_at,
+               document_id, classification, owner_department_id,
+               valid_from, reader_policy_id, metadata, author_id
              ) VALUES (
-               $1, $2, $3, NULL, $5, 1, $6, $7, 'INDEXED', now(), $8, 'INTERNAL', $9, $10::uuid[],
-               now(), $11, $12::jsonb, $4
+               $1, $2, $3, NULL, $5, 1, $6, $7, 'INDEXED', now(), $8, 'INTERNAL', $9,
+               now(), $10, $11::jsonb, $4
              )`,
             [
               versionId, submissionId, kb.rows[0]!.knowledge_base_id, ids.authorM, title,
               `arden-private-object://${draftId}`, "d".repeat(64), draftId, ids.sales,
-              [ids.allMembersA], selectionId, management,
+              selectionId, management,
             ],
           );
           await client.query(
-            `INSERT INTO knowledge_current_publication (
-               shared_draft_id, organization_id, published_version_id, audience_role_ids,
-               target_scope_type, target_department_id, valid_from, reader_selection_id
-             ) VALUES ($1, $2, $3, $4::uuid[], 'ORGANIZATION', NULL, now(), $5)`,
-            [draftId, ids.orgA, versionId, [ids.allMembersA], selectionId],
+            `INSERT INTO current_publication (
+               document_id, organization_id, published_version_id,
+               target_scope, target_department_id, valid_from, reader_policy_id
+             ) VALUES ($1, $2, $3, 'ORGANIZATION', NULL, now(), $4)`,
+            [draftId, ids.orgA, versionId, selectionId],
           );
         });
         return { versionId, selectionId };
@@ -514,7 +478,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const expiredTarget = await createDraft(ids.author, ids.orgA, ids.authorM, "Expired link target");
       const foreign = await createDraft(ids.foreign, ids.orgB, ids.foreignM, "Foreign target");
       const link = (client: PoolClient, organizationId: string, to: string, by = ids.authorM) => client.query(`
-        INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_membership_id)
+        INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_id)
         VALUES ($1, $2, $3, $4)`, [organizationId, source, to, by]);
 
       // Cross-org and self-link structural constraints stay enforced at schema level.
@@ -556,9 +520,9 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)",
           [ids.author, ids.orgA]);
         const inserted = await client.query<{ relationship_id: string; target_document_id: string }>(`
-          INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_membership_id)
+          INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_id)
           VALUES ($1, $2, $3, $4)
-          RETURNING relationship_id, target_document_id`, [ids.orgA, source, target, ids.authorM]);
+          RETURNING id AS relationship_id, target_document_id`, [ids.orgA, source, target, ids.authorM]);
         expect(inserted.rows[0]?.target_document_id).toBe(target);
         const visible = await client.query("SELECT target_document_id FROM document_relationship WHERE source_document_id = $1", [source]);
         expect(visible.rows).toEqual([{ target_document_id: target }]);
@@ -577,14 +541,14 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
         await client.query(
-          `UPDATE published_knowledge_version
-              SET management = jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', '2020-01-01', 'changeNote', '')
-            WHERE published_version_id = $1`,
+          `UPDATE published_version
+              SET metadata = jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', '2020-01-01', 'changeNote', '')
+            WHERE id = $1`,
           [publishedTarget.versionId],
         );
       });
       await expect(asRuntime(ids.author, ids.orgA, (client) =>
-        client.query("SELECT 1 FROM document_relationship WHERE relationship_id = $1", [createdRelationshipId])))
+        client.query("SELECT 1 FROM document_relationship WHERE id = $1", [createdRelationshipId])))
         .resolves.toMatchObject({ rowCount: 0 });
       await expect(asRuntime(ids.outsider, ids.orgA, (client) =>
         client.query("SELECT * FROM remove_governed_document_relationship($1, $2)", [source, createdRelationshipId])))
@@ -596,153 +560,19 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     });
   });
 
-  describe("T1.2 legacy audiences to Target Readers (migration 0028)", () => {
-    const groupRole = id();
-    const emptyRole = id();
-    const scopes = { sales: id(), engineering: id() };
-    const fixturePublications: string[] = [];
-
-    /** A legacy current publication (readers NULL). Only the columns the backfill reads are meaningful. */
-    const legacyPublication = (scope: "ORGANIZATION" | "DEPARTMENT", departmentId: string | null, roleIds: string[]) =>
-      asSuperuser(async (client) => {
-        const draftId = id();
-        const versionId = id();
-        // validate_current_publication re-checks the pointer against its knowledge base on every update.
-        const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
-            (organization_id, name, scope_type, department_id) VALUES ($1, 'Legacy fixture ' || $4, $2, $3)
-          RETURNING knowledge_base_id`, [ids.orgA, scope, departmentId, draftId]);
-        await client.query("SET LOCAL session_replication_role = replica");
-        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
-            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
-            audience_role_ids, valid_from)
-          VALUES ($1, $2, $3, 'Legacy publication', 1, 'arden-private-object://legacy', $4, $5, 'INTERNAL', $6, $7::uuid[], now())`,
-        [versionId, id(), knowledgeBase.rows[0]?.knowledge_base_id, "e".repeat(64), draftId, ids.sales, roleIds]);
-        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
-            audience_role_ids, target_scope_type, target_department_id, valid_from)
-          VALUES ($1, $2, $3, $4::uuid[], $5, $6, now())`, [draftId, ids.orgA, versionId, roleIds, scope, departmentId]);
-        fixturePublications.push(versionId);
-        return draftId;
-      });
-
-    const report = (apply: boolean) => asSuperuser((client) => client.query<{ shared_draft_id: string; outcome: string;
-      reader_mode: string | null; audience_readers: number; target_readers: number; wider_readers: number }>(
-      "SELECT * FROM migrate_publication_readers($1, $2)", [apply, ids.orgA]));
-
-    beforeAll(async () => {
-      if (!fixtureReady) return;
-      await asSuperuser(async (client) => {
-        await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $3, $4, 'Group'), ($2, $3, $5, 'Empty')`,
-          [groupRole, emptyRole, ids.orgA, `GROUP_${groupRole.slice(0, 8).toUpperCase()}`, `EMPTY_${emptyRole.slice(0, 8).toUpperCase()}`]);
-        await client.query(`INSERT INTO role_permission (role_id, permission_id)
-          SELECT role_id, permission_id FROM unnest($1::uuid[]) AS role_id
-            CROSS JOIN permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`,
-        [[groupRole, emptyRole, ids.salesRole, ids.engineeringRole]]);
-        await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type, department_id)
-          VALUES ($1, $3, 'DEPARTMENT', $4), ($2, $3, 'DEPARTMENT', $5)`,
-        [scopes.sales, scopes.engineering, ids.orgA, ids.sales, ids.engineering]);
-        // Sales readers: author and reviewer hold the department role; outsider is in Sales but does not.
-        await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-          VALUES ($1, $4, $6), ($2, $4, $6), ($3, $5, $7), ($3, $8, $9)`,
-        [ids.authorM, ids.reviewerM, ids.engineerM, ids.salesRole, ids.engineeringRole, scopes.sales, scopes.engineering,
-          groupRole, ids.scopeA]);
-      });
-    });
-
-    afterAll(async () => {
-      if (!fixtureReady) return;
-      await asSuperuser(async (client) => {
-        await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("DELETE FROM knowledge_current_publication WHERE published_version_id = ANY($1::uuid[])", [fixturePublications]);
-        await client.query("DELETE FROM published_knowledge_version WHERE published_version_id = ANY($1::uuid[])", [fixturePublications]);
-        await client.query("DELETE FROM role_assignment WHERE role_id = ANY($1::uuid[])", [[groupRole, ids.salesRole, ids.engineeringRole]]);
-        await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])",
-          [[groupRole, emptyRole, ids.salesRole, ids.engineeringRole]]);
-        await client.query("DELETE FROM access_scope WHERE access_scope_id = ANY($1::uuid[])", [[scopes.sales, scopes.engineering]]);
-      });
-    });
-
-    it("maps every publication without widening its readers and reports before/after counts", async () => {
-      const organizationWide = await legacyPublication("ORGANIZATION", null, [ids.allMembersA]);
-      const engineering = await legacyPublication("DEPARTMENT", ids.engineering, [ids.engineeringRole]);
-      const partialSales = await legacyPublication("DEPARTMENT", ids.sales, [ids.salesRole]);
-      const oneMemberGroup = await legacyPublication("ORGANIZATION", null, [groupRole]);
-      const nobody = await legacyPublication("ORGANIZATION", null, [emptyRole]);
-      const expected = {
-        [organizationWide]: { reader_mode: "ORGANIZATION", audience_readers: 4, target_readers: 4 },
-        [engineering]: { reader_mode: "DEPARTMENT", audience_readers: 1, target_readers: 1 },
-        // Outsider is in Sales without the role today, so DEPARTMENT would widen: keep the exact readers.
-        [partialSales]: { reader_mode: "SELECTED_MEMBERS", audience_readers: 2, target_readers: 2 },
-        [oneMemberGroup]: { reader_mode: null, audience_readers: 1, target_readers: 0 },
-        [nobody]: { reader_mode: null, audience_readers: 0, target_readers: 0 },
-      };
-      const rows = (result: Awaited<ReturnType<typeof report>>) =>
-        Object.fromEntries(result.rows.filter((row) => row.shared_draft_id in expected).map((row) => [row.shared_draft_id, row]));
-
-      const dryRun = rows(await report(false));
-      for (const [draftId, row] of Object.entries(expected)) {
-        expect(dryRun[draftId]).toMatchObject({ ...row, wider_readers: 0,
-          outcome: row.reader_mode ? "WOULD_MAP" : "UNMAPPED" });
-      }
-      const unchanged = await asSuperuser((client) => client.query(`SELECT 1 FROM knowledge_current_publication
-        WHERE shared_draft_id = ANY($1::uuid[]) AND reader_selection_id IS NOT NULL`, [Object.keys(expected)]));
-      expect(unchanged.rowCount).toBe(0);
-
-      const applied = rows(await report(true));
-      for (const [draftId, row] of Object.entries(expected)) {
-        expect(applied[draftId]).toMatchObject({ ...row, wider_readers: 0, outcome: row.reader_mode ? "MAPPED" : "UNMAPPED" });
-      }
-      const after = rows(await report(false));
-      for (const [draftId, row] of Object.entries(expected)) {
-        expect(after[draftId]).toMatchObject({ ...row, wider_readers: 0, outcome: row.reader_mode ? "ALREADY_SET" : "UNMAPPED" });
-      }
-      const stored = await asSuperuser((client) => client.query<{ shared_draft_id: string; members: string[] }>(`
-        SELECT cp.shared_draft_id, ARRAY(SELECT sr.membership_id::text FROM selected_reader sr
-                 WHERE sr.selection_id = cp.reader_selection_id ORDER BY sr.membership_id) AS members
-          FROM knowledge_current_publication cp
-          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
-                                             AND pv.reader_selection_id = cp.reader_selection_id
-         WHERE cp.shared_draft_id = $1`, [partialSales]));
-      expect(stored.rows[0]?.members).toEqual([ids.authorM, ids.reviewerM].sort());
-      // Effective access only narrows: the outsider never had the Sales role and still cannot read it.
-      const outsiderView = await asRuntime(ids.outsider, ids.orgA, (client) => client.query(
-        "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = ANY($1::uuid[])",
-        [[organizationWide, partialSales]]));
-      expect(outsiderView.rows).toEqual([{ shared_draft_id: organizationWide }]);
-
-      // After cutover the frozen selection, not a legacy role assignment, is authoritative.
-      const selectedView = () => asRuntime(ids.author, ids.orgA, (client) => client.query(
-        "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [partialSales]));
-      expect((await selectedView()).rows).toEqual([{ shared_draft_id: partialSales }]);
-      try {
-        const revoked = await asSuperuser((client) => client.query(`UPDATE role_assignment SET status = 'REVOKED'
-          WHERE membership_id = $1 AND role_id = $2 AND access_scope_id = $3`,
-        [ids.authorM, ids.salesRole, scopes.sales]));
-        expect(revoked.rowCount).toBe(1);
-        const legacyReaders = await asSuperuser((client) => client.query<{ membership_id: string }>(`
-          SELECT audience_reader_memberships($1, $2::uuid[], 'DEPARTMENT', $3) AS membership_id`,
-        [ids.orgA, [ids.salesRole], ids.sales]));
-        expect(legacyReaders.rows.map((row) => row.membership_id)).not.toContain(ids.authorM);
-        expect((await selectedView()).rows).toEqual([{ shared_draft_id: partialSales }]);
-        const denied = await asRuntime(ids.outsider, ids.orgA, (client) => client.query(
-          "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [partialSales]));
-        expect(denied.rows).toEqual([]);
-      } finally {
-        await asSuperuser((client) => client.query(`UPDATE role_assignment SET status = 'ACTIVE'
-          WHERE membership_id = $1 AND role_id = $2 AND access_scope_id = $3`,
-        [ids.authorM, ids.salesRole, scopes.sales]));
-      }
-    });
-
-    it("runs only for the trusted operator role", async () => {
-      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query("SELECT * FROM migrate_publication_readers(false)")))
-        .rejects.toMatchObject({ code: "42501" });
-    });
+  it("runs Target Readers with the retired tables and Audience helper removed", async () => {
+    const inventory = await asSuperuser((client) => client.query(`SELECT
+      to_regclass('arden.audience') AS catalog,
+      to_regclass('arden.audience_group_membership') AS memberships,
+      to_regclass('arden.shared_draft_audience') AS draft_audiences,
+      to_regprocedure('arden.actor_in_publication_audience(uuid,uuid[],text,uuid)') AS authorization`));
+    expect(inventory.rows).toEqual([{ catalog: null, memberships: null, draft_audiences: null, authorization: null }]);
   });
 
   describe("T5.1 withdraw a pending submission (migration 0029)", () => {
     it("withdraws only the author's pending submission, once, and refuses a decided one", async () => {
       if (!repository) throw new Error("Test database is unavailable");
-      const { draftId, submissionId } = await submitLegacyDraft("Withdrawal fixture");
+      const { draftId, submissionId } = await submitSelectedDraft("Withdrawal fixture");
       await expect(repository.withdrawKnowledgeSubmission(ids.outsider, ids.orgA, submissionId, "flow2-withdraw"))
         .resolves.toEqual({ kind: "not-found" });
       await expect(repository.withdrawKnowledgeSubmission(ids.foreign, ids.orgA, submissionId, "flow2-withdraw"))
@@ -752,29 +582,29 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, submissionId, "flow2-withdraw"))
         .resolves.toMatchObject({ kind: "replayed", submission: { status: "WITHDRAWN" } });
       const evidence = await asSuperuser((client) => client.query<{ pending: string; audits: string }>(`
-        SELECT (SELECT count(*) FROM shared_submission WHERE shared_draft_id = $1 AND status = 'PENDING_REVIEW')::text AS pending,
+        SELECT (SELECT count(*) FROM review_submission WHERE document_id = $1 AND status = 'PENDING_REVIEW')::text AS pending,
                (SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_SUBMISSION_WITHDRAWN'
-                  AND details_json->>'submissionId' = $2)::text AS audits`, [draftId, submissionId]));
+                  AND details->>'submissionId' = $2)::text AS audits`, [draftId, submissionId]));
       expect(evidence.rows[0]).toEqual({ pending: "0", audits: "1" });
       // A withdrawal is final, even for the database owner.
-      await expect(sqlState((client) => client.query(`UPDATE shared_submission SET status = 'PENDING_REVIEW'
-        WHERE submission_id = $1`, [submissionId]))).resolves.toBe("55000");
+      await expect(sqlState((client) => client.query(`UPDATE review_submission SET status = 'PENDING_REVIEW'
+        WHERE id = $1`, [submissionId]))).resolves.toBe("55000");
     });
 
     it("returns a conflict for an approved submission and blocks a direct runtime withdrawal by others", async () => {
       if (!repository) throw new Error("Test database is unavailable");
-      const approved = await submitLegacyDraft("Approved fixture");
-      await asSuperuser((client) => client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING',
-        approved_selection_id = proposed_selection_id
-        WHERE submission_id = $1`, [approved.submissionId]));
+      const approved = await submitSelectedDraft("Approved fixture");
+      await asSuperuser((client) => client.query(`UPDATE review_submission SET status = 'APPROVED', publication_state = 'PREPARING',
+        approved_reader_policy_id = proposed_reader_policy_id
+        WHERE id = $1`, [approved.submissionId]));
       await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, approved.submissionId, "flow2-withdraw"))
         .resolves.toEqual({ kind: "conflict" });
-      await expect(sqlState((client) => client.query(`UPDATE shared_submission SET status = 'WITHDRAWN', publication_state = 'NONE'
-        WHERE submission_id = $1`, [approved.submissionId]))).resolves.toBe("55000");
+      await expect(sqlState((client) => client.query(`UPDATE review_submission SET status = 'WITHDRAWN', publication_state = 'NONE'
+        WHERE id = $1`, [approved.submissionId]))).resolves.toBe("55000");
 
-      const pending = await submitLegacyDraft("Pending fixture");
-      const changed = await asRuntime(ids.reviewer, ids.orgA, (client) => client.query(`UPDATE shared_submission
-        SET status = 'WITHDRAWN' WHERE submission_id = $1`, [pending.submissionId]));
+      const pending = await submitSelectedDraft("Pending fixture");
+      const changed = await asRuntime(ids.reviewer, ids.orgA, (client) => client.query(`UPDATE review_submission
+        SET status = 'WITHDRAWN' WHERE id = $1`, [pending.submissionId]));
       expect(changed.rowCount).toBe(0);
     });
   });
@@ -782,32 +612,32 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
   describe("T6.1 reader-change and withdrawal requests (migrations 0034–0035)", () => {
     /** Publishes a real approved submission by pointing the current publication at it (no index pipeline). */
     const publish = async (title: string) => {
-      const { draftId, submissionId } = await submitLegacyDraft(title);
+      const { draftId, submissionId } = await submitSelectedDraft(title);
       const versionId = id();
       await asSuperuser(async (client) => {
-        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
-            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
+        await client.query(`UPDATE review_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
+            approved_reader_policy_id = proposed_reader_policy_id WHERE id = $1`, [submissionId]);
         const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
-            (organization_id, name, scope_type) VALUES ($1, 'Change fixture ' || $2, 'ORGANIZATION')
-          RETURNING knowledge_base_id`, [ids.orgA, draftId]);
+            (organization_id, name, scope) VALUES ($1, 'Change fixture ' || $2, 'ORGANIZATION')
+          RETURNING id AS knowledge_base_id`, [ids.orgA, draftId]);
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
-            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
-            audience_role_ids, valid_from, reader_selection_id)
-          SELECT $1, s.submission_id, $3, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id, s.classification,
-                 s.responsible_department_id, s.audience_role_ids, now(), s.approved_selection_id
-            FROM shared_submission s WHERE s.submission_id = $2`,
+        await client.query(`INSERT INTO published_version (id, review_submission_id, knowledge_base_id,
+            title, version_no, file_uri, content_hash, document_id, classification, owner_department_id,
+            valid_from, reader_policy_id)
+          SELECT $1, s.id, $3, s.title, 1, s.file_uri, s.content_hash, s.document_id, s.classification,
+                 s.owner_department_id, now(), s.approved_reader_policy_id
+            FROM review_submission s WHERE s.id = $2`,
         [versionId, submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
-        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
-            audience_role_ids, target_scope_type, valid_from, reader_selection_id)
-          SELECT pv.shared_draft_id, $2, pv.published_version_id, pv.audience_role_ids, 'ORGANIZATION', pv.valid_from,
-                 pv.reader_selection_id FROM published_knowledge_version pv WHERE pv.published_version_id = $1`,
+        await client.query(`INSERT INTO current_publication (document_id, organization_id, published_version_id,
+            target_scope, valid_from, reader_policy_id)
+          SELECT pv.document_id, $2, pv.id, 'ORGANIZATION', pv.valid_from,
+                 pv.reader_policy_id FROM published_version pv WHERE pv.id = $1`,
         [versionId, ids.orgA]);
       });
       return { draftId, submissionId, versionId };
     };
     const currentPointer = (draftId: string) => asSuperuser(async (client) => (await client.query(
-      "SELECT published_version_id, reader_selection_id FROM knowledge_current_publication WHERE shared_draft_id = $1",
+      "SELECT published_version_id, reader_policy_id AS reader_selection_id FROM current_publication WHERE document_id = $1",
       [draftId])).rows[0]);
     const ask = (draftId: string, input: Omit<Parameters<ArdenRepository["requestPublicationChange"]>[3], "idempotencyKey">,
       key = randomUUID(), userId = ids.author) =>
@@ -834,8 +664,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toMatchObject({ kind: "replayed", submission: { id: requested.submission.id } });
       await expect(ask(draftId, { type: "WITHDRAWAL", reason: "Again" })).resolves.toEqual({ kind: "conflict" });
       await expect(currentPointer(draftId)).resolves.toEqual(before);
-      const stored = await asSuperuser((client) => client.query(`SELECT target_published_version_id FROM shared_submission
-        WHERE submission_id = $1`, [requested.submission.id]));
+      const stored = await asSuperuser((client) => client.query(`SELECT target_published_version_id FROM review_submission
+        WHERE id = $1`, [requested.submission.id]));
       expect(stored.rows[0]).toEqual({ target_published_version_id: versionId });
 
       // The author is an Organization Admin here, so their own request is in their queue.
@@ -873,7 +703,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const requested = await ask(draftId, { type: "WITHDRAWAL", reason: "Superseded by the new handbook" });
       if (requested.kind !== "requested") throw new Error("Request failed");
       const visible = async (userId: string) => (await asRuntime(userId, ids.orgA, (client) => client.query(
-        "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]))).rowCount;
+        "SELECT 1 FROM current_publication WHERE document_id = $1", [draftId]))).rowCount;
       expect(await visible(ids.engineer)).toBe(1);
 
       const approved = await repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
@@ -887,10 +717,10 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(library?.some((item) => item.id === versionId)).toBe(false);
       await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, versionId)).resolves.toBeNull();
       const released = await asSuperuser((client) => client.query(
-        "SELECT publication_state FROM shared_submission WHERE submission_id = $1", [submissionId]));
+        "SELECT publication_state FROM review_submission WHERE id = $1", [submissionId]));
       expect(released.rows[0]).toEqual({ publication_state: "WITHDRAWN" });
-      const audit = await asSuperuser((client) => client.query(`SELECT details_json->>'requestType' AS type FROM audit_event
-        WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED' AND details_json->>'submissionId' = $1`, [requested.submission.id]));
+      const audit = await asSuperuser((client) => client.query(`SELECT details->>'requestType' AS type FROM audit_event
+        WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED' AND details->>'submissionId' = $1`, [requested.submission.id]));
       expect(audit.rows).toEqual([{ type: "WITHDRAWAL" }]);
 
       // No restore: the approved request cannot be applied again, and a new request needs a publication.
@@ -900,9 +730,9 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       // Publishing again is a new content submission of a new version.
       const edited = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 2, { title: "Published again" },
         null, "republish-edit");
-      // A new business version with a Change Note, set like prepareKnowledgeFixture (this fixture keeps its audiences).
-      await asSuperuser((client) => client.query(`UPDATE shared_draft SET management = management
-        || jsonb_build_object('version', '2.0', 'changeNote', 'Republished after review') WHERE shared_draft_id = $1`, [draftId]));
+      // A new business version with a Change Note, set like prepareKnowledgeFixture (this fixture uses a prepared reader selection).
+      await asSuperuser((client) => client.query(`UPDATE company_document SET metadata = metadata
+        || jsonb_build_object('version', '2.0', 'changeNote', 'Republished after review') WHERE id = $1`, [draftId]));
       if (edited.kind !== "updated") throw new Error("Edit failed");
       await expect(repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 3, randomUUID(), "republish"))
         .resolves.toMatchObject({ kind: "submitted", submission: { requestType: "CONTENT", status: "PENDING_REVIEW" } });
@@ -912,7 +742,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, versionId } = await publish("Published then narrowed");
       const activationNotifications = await asSuperuser((client) => client.query(`
-        SELECT notification_id FROM arden_notification
+        SELECT id AS notification_id FROM notification
          WHERE organization_id = $1 AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
            AND resource_id = $2`, [ids.orgA, versionId]));
       expect(activationNotifications.rows).toEqual([]);
@@ -929,12 +759,12 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(after?.reader_selection_id).not.toBe(before?.reader_selection_id);
       const personalShareNotifications = await asSuperuser((client) => client.query<{
         event_type: string; recipient_membership_id: string; publication_title: string; shared_by_name: string; has_outbox: boolean;
-      }>(`SELECT n.event_type, n.recipient_membership_id, n.publication_title, n.shared_by_name,
-                  EXISTS (SELECT 1 FROM arden_notification_outbox o WHERE o.notification_id = n.notification_id) AS has_outbox
-            FROM arden_notification n
+      }>(`SELECT n.event_type, n.recipient_id AS recipient_membership_id, n.publication_title, n.shared_by_name,
+                  EXISTS (SELECT 1 FROM notification_outbox o WHERE o.notification_id = n.id) AS has_outbox
+            FROM notification n
            WHERE n.organization_id = $1 AND n.event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
              AND n.resource_type = 'PUBLICATION' AND n.resource_id = $2
-           ORDER BY n.recipient_membership_id`, [ids.orgA, versionId]));
+           ORDER BY n.recipient_id`, [ids.orgA, versionId]));
       expect(personalShareNotifications.rows).toHaveLength(2);
       expect(personalShareNotifications.rows).toEqual(expect.arrayContaining([
         { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.engineerM,
@@ -960,7 +790,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const afterNarrowingNotifications = await asSuperuser((client) => client.query<{
         event_type: string; recipient_membership_id: string;
       }>(`
-        SELECT event_type, recipient_membership_id FROM arden_notification
+        SELECT event_type, recipient_id AS recipient_membership_id FROM notification
          WHERE organization_id = $1 AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
            AND resource_type = 'PUBLICATION' AND resource_id = $2
          ORDER BY recipient_membership_id`, [ids.orgA, versionId]));
@@ -979,12 +809,12 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, versionId } = await publish("Published for group share");
       await asSuperuser(async (client) => {
-        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_selection
-          (organization_id, reader_mode) VALUES ($1, 'ORGANIZATION') RETURNING selection_id`, [ids.orgA]);
+        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_policy
+          (organization_id, mode) VALUES ($1, 'ORGANIZATION') RETURNING id AS selection_id`, [ids.orgA]);
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("UPDATE published_knowledge_version SET reader_selection_id = $2 WHERE published_version_id = $1",
+        await client.query("UPDATE published_version SET reader_policy_id = $2 WHERE id = $1",
           [versionId, selection.rows[0]!.selection_id]);
-        await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $2 WHERE published_version_id = $1",
+        await client.query("UPDATE current_publication SET reader_policy_id = $2 WHERE published_version_id = $1",
           [versionId, selection.rows[0]!.selection_id]);
       });
       const requested = await ask(draftId, { type: "READER_CHANGE", reason: "Share with Sales",
@@ -995,7 +825,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toMatchObject({ kind: "decided", submission: { approvedTargetReaders: { mode: "DEPARTMENT", departmentId: ids.sales } } });
       const groupNotifications = await asSuperuser((client) => client.query<{
         event_type: string; recipient_membership_id: string; publication_title: string; shared_by_name: string;
-      }>(`SELECT event_type, recipient_membership_id, publication_title, shared_by_name FROM arden_notification
+      }>(`SELECT event_type, recipient_id AS recipient_membership_id, publication_title, shared_by_name FROM notification
            WHERE organization_id = $1 AND resource_id = $2
            ORDER BY recipient_membership_id`, [ids.orgA, versionId]));
       expect(groupNotifications.rows).toHaveLength(2);
@@ -1015,7 +845,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       // Simulate the pointer leaving the requested version (for example an Org Admin emergency withdrawal).
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("DELETE FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]);
+        await client.query("DELETE FROM current_publication WHERE document_id = $1", [draftId]);
       });
       await expect(repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
         requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "stale-approve"))
@@ -1027,38 +857,39 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
 
     it("refuses a change request that does not repeat the current publication", async () => {
       const { draftId, submissionId } = await publish("Published for integrity");
-      await expect(sqlState((client) => client.query(`INSERT INTO shared_submission (organization_id, shared_draft_id,
-          shared_draft_version_id, snapshot_version_no, submitted_by_membership_id, target_scope_type, responsible_department_id,
-          title, classification, audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id,
+      await expect(sqlState((client) => client.query(`INSERT INTO review_submission (organization_id, document_id,
+          working_version_id, snapshot_version_no, submitted_by_id, target_scope, owner_department_id,
+          title, classification, policy_version, file_uri, mime_type, content_hash, submit_request_id,
           request_type, request_reason, target_published_version_id)
-        SELECT organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no, $2, target_scope_type,
-               responsible_department_id, title, classification, audience_role_ids, 1, content_uri, mime_type, content_hash,
-               gen_random_uuid(), 'WITHDRAWAL', 'Not the author', (SELECT published_version_id FROM knowledge_current_publication
-                 WHERE shared_draft_id = $3)
-          FROM shared_submission WHERE submission_id = $1`, [submissionId, ids.reviewerM, draftId]))).resolves.toBe("23514");
+        SELECT organization_id, document_id, working_version_id, snapshot_version_no, $2, target_scope,
+               owner_department_id, title, classification, 1, file_uri, mime_type, content_hash,
+               gen_random_uuid(), 'WITHDRAWAL', 'Not the author', (SELECT published_version_id FROM current_publication
+                 WHERE document_id = $3)
+          FROM review_submission WHERE id = $1`, [submissionId, ids.reviewerM, draftId]))).resolves.toBe("23514");
     });
   });
 
   describe("T6.3 retry a failed preparation (migration 0036)", () => {
     /** An approved content submission with the generation and job the approval trigger creates (0019). */
     const prepare = async (title: string) => {
-      const { draftId, submissionId } = await submitLegacyDraft(title);
+      const { draftId, submissionId } = await submitSelectedDraft(title);
       return asSuperuser(async (client) => {
-        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING',
-            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
-        const generation = await client.query<{ generation_id: string }>(`INSERT INTO knowledge_index_generation
-            (organization_id, submission_id, shared_draft_id, snapshot_version_id, snapshot_content_hash)
-          SELECT organization_id, submission_id, shared_draft_id, shared_draft_version_id, content_hash
-            FROM shared_submission WHERE submission_id = $1 RETURNING generation_id`, [submissionId]);
-        const job = await client.query<{ job_id: string; max_attempts: number }>(`INSERT INTO knowledge_index_job
-            (generation_id) VALUES ($1) RETURNING job_id, max_attempts`, [generation.rows[0]?.generation_id]);
+        await client.query(`UPDATE review_submission SET status = 'APPROVED', publication_state = 'PREPARING',
+            approved_reader_policy_id = proposed_reader_policy_id WHERE id = $1`, [submissionId]);
+        const job = await client.query<{ job_id: string; max_attempts: number }>(`INSERT INTO index_generation
+            (organization_id, review_submission_id, document_id, snapshot_version_id, snapshot_content_hash,
+             job_id, job_status, attempt_count, max_attempts, available_at, job_created_at, job_updated_at)
+          SELECT organization_id, id, document_id, working_version_id, content_hash,
+                 gen_random_uuid(), 'PENDING', 0, 6, now(), now(), now()
+            FROM review_submission WHERE id = $1 RETURNING job_id, max_attempts`, [submissionId]);
         return { draftId, submissionId, jobId: job.rows[0]!.job_id, maxAttempts: job.rows[0]!.max_attempts };
       });
     };
     /** What the worker does after an attempt fails: fail_knowledge_index_job under its own lease. */
     const failAttempt = (jobId: string, attempt: number, code: string, retryable: boolean) => asSuperuser(async (client) => {
       const worker = randomUUID();
-      await client.query(`UPDATE knowledge_index_job SET status = 'RUNNING', attempt_count = $2, lease_owner = $3,
+      await client.query(`UPDATE index_generation SET status = 'PROCESSING', job_status = 'RUNNING',
+          attempt_count = $2, lease_owner_id = $3,
           lease_expires_at = now() + interval '5 minutes' WHERE job_id = $1`, [jobId, attempt, worker]);
       return (await client.query<{ status: string }>("SELECT fail_knowledge_index_job($1, $2, $3, $4) AS status",
         [jobId, worker, code, retryable])).rows[0]?.status;
@@ -1066,11 +897,11 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     const state = (submissionId: string) => asSuperuser(async (client) => (await client.query<{
       publication_state: string; publication_failure_code: string | null; generation: string; job: string;
       attempt_count: number; audits: string }>(`
-      SELECT s.publication_state, s.publication_failure_code, g.status AS generation, j.status AS job, j.attempt_count,
+      SELECT s.publication_state, s.publication_failure_code, g.status AS generation, g.job_status AS job, g.attempt_count,
              (SELECT count(*) FROM audit_event a WHERE a.event_type = 'KNOWLEDGE_PUBLICATION_RETRIED'
-                AND a.details_json->>'submissionId' = s.submission_id::text)::text AS audits
-        FROM shared_submission s JOIN knowledge_index_generation g USING (submission_id)
-        JOIN knowledge_index_job j USING (generation_id) WHERE s.submission_id = $1`, [submissionId])).rows[0]);
+                AND a.details->>'submissionId' = s.id::text)::text AS audits
+        FROM review_submission s JOIN index_generation g ON s.id = g.review_submission_id
+        WHERE s.id = $1`, [submissionId])).rows[0]);
     const failure = async (submissionId: string) => (await repository!.listKnowledgeSubmissions(ids.author, ids.orgA))
       ?.find((submission) => submission.id === submissionId)?.publicationFailure;
 
@@ -1080,7 +911,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(maxAttempts).toBe(6);
       await expect(failAttempt(jobId, 1, "AI_SERVICE_UNAVAILABLE", true)).resolves.toBe("PENDING");
       const delay = await asSuperuser(async (client) => (await client.query<{ seconds: number }>(
-        "SELECT extract(epoch FROM available_at - now())::float AS seconds FROM knowledge_index_job WHERE job_id = $1",
+        "SELECT extract(epoch FROM available_at - now())::float AS seconds FROM index_generation WHERE job_id = $1",
         [jobId])).rows[0]?.seconds ?? 0);
       expect(delay).toBeGreaterThan(20);
       expect(delay).toBeLessThanOrEqual(30);
@@ -1104,10 +935,13 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
 
       // The runtime cannot write the failure code or restart preparation itself.
       await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
-        "UPDATE shared_submission SET publication_failure_code = 'AI_SERVICE_UNAVAILABLE' WHERE submission_id = $1",
+        "UPDATE review_submission SET publication_failure_code = 'AI_SERVICE_UNAVAILABLE' WHERE id = $1",
         [submissionId]))).rejects.toMatchObject({ code: "42501" });
       await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
-        "UPDATE knowledge_index_job SET status = 'PENDING' WHERE job_id = $1", [jobId]))).rejects.toMatchObject({ code: "42501" });
+        "UPDATE index_generation SET job_status = 'PENDING' WHERE job_id = $1", [jobId])))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
+        "SELECT job_status FROM index_generation"))).rejects.toMatchObject({ code: "42501" });
     });
 
     it("refuses content and system failures, a pending submission and an already published snapshot", async () => {
@@ -1125,7 +959,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toEqual({ kind: "not-retryable" });
       await expect(state(integrity.submissionId)).resolves.toMatchObject({ publication_state: "FAILED", audits: "0" });
 
-      const pending = await submitLegacyDraft("Still pending");
+      const pending = await submitSelectedDraft("Still pending");
       await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, pending.submissionId))
         .resolves.toEqual({ kind: "not-failed" });
 
@@ -1135,15 +969,15 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(failAttempt(stale.jobId, 1, "AI_SERVICE_UNAVAILABLE", false)).resolves.toBe("FAILED");
       await asSuperuser(async (client) => {
         const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
-            (organization_id, name, scope_type) VALUES ($1, 'Retry fixture ' || $2, 'ORGANIZATION')
-          RETURNING knowledge_base_id`, [ids.orgA, stale.draftId]);
+            (organization_id, name, scope) VALUES ($1, 'Retry fixture ' || $2, 'ORGANIZATION')
+          RETURNING id AS knowledge_base_id`, [ids.orgA, stale.draftId]);
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
-            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
-            audience_role_ids, valid_from, reader_selection_id)
-          SELECT gen_random_uuid(), s.submission_id, $2, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id,
-                 s.classification, s.responsible_department_id, s.audience_role_ids, now(), s.approved_selection_id
-            FROM shared_submission s WHERE s.submission_id = $1`, [stale.submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
+        await client.query(`INSERT INTO published_version (id, review_submission_id, knowledge_base_id,
+            title, version_no, file_uri, content_hash, document_id, classification, owner_department_id,
+            valid_from, reader_policy_id)
+          SELECT gen_random_uuid(), s.id, $2, s.title, 1, s.file_uri, s.content_hash, s.document_id,
+                 s.classification, s.owner_department_id, now(), s.approved_reader_policy_id
+            FROM review_submission s WHERE s.id = $1`, [stale.submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
       });
       await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, stale.submissionId))
         .resolves.toEqual({ kind: "superseded" });
@@ -1152,11 +986,12 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     it("records the failure code when the final lease expires without a worker", async () => {
       const { submissionId, jobId } = await prepare("Lease exhausted");
       await asSuperuser(async (client) => {
-        await client.query(`UPDATE knowledge_index_job SET status = 'RUNNING', attempt_count = max_attempts,
-            lease_owner = gen_random_uuid(), lease_expires_at = now() - interval '1 second' WHERE job_id = $1`, [jobId]);
+        await client.query(`UPDATE index_generation SET status = 'PROCESSING', job_status = 'RUNNING',
+            attempt_count = max_attempts, lease_owner_id = gen_random_uuid(),
+            lease_expires_at = now() - interval '1 second' WHERE job_id = $1`, [jobId]);
         await client.query("SELECT * FROM claim_knowledge_index_job(gen_random_uuid(), 60)");
         const row = (await client.query<{ publication_state: string; publication_failure_code: string }>(
-          "SELECT publication_state, publication_failure_code FROM shared_submission WHERE submission_id = $1",
+          "SELECT publication_state, publication_failure_code FROM review_submission WHERE id = $1",
           [submissionId])).rows[0];
         expect(row).toEqual({ publication_state: "FAILED", publication_failure_code: "INDEXING_LEASE_EXHAUSTED" });
       }, false);
@@ -1166,25 +1001,25 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
   describe("decision 0023 governance (migration 0037)", () => {
     /** A current publication readable by the selected author and engineer, responsible department Sales. */
     const publishSelected = async (title: string) => {
-      const { draftId, submissionId } = await submitLegacyDraft(title);
+      const { draftId, submissionId } = await submitSelectedDraft(title);
       const versionId = id();
       await asSuperuser(async (client) => {
-        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
-            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
+        await client.query(`UPDATE review_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
+            approved_reader_policy_id = proposed_reader_policy_id WHERE id = $1`, [submissionId]);
         const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
-            (organization_id, name, scope_type) VALUES ($1, 'Governance ' || $2, 'ORGANIZATION') RETURNING knowledge_base_id`,
+            (organization_id, name, scope) VALUES ($1, 'Governance ' || $2, 'ORGANIZATION') RETURNING id AS knowledge_base_id`,
         [ids.orgA, draftId]);
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
-            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
-            audience_role_ids, valid_from, reader_selection_id)
-          SELECT $1, s.submission_id, $3, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id, s.classification,
-                 s.responsible_department_id, s.audience_role_ids, now(), s.approved_selection_id
-            FROM shared_submission s WHERE s.submission_id = $2`, [versionId, submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
-        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
-            audience_role_ids, target_scope_type, valid_from, reader_selection_id)
-          SELECT pv.shared_draft_id, $2, pv.published_version_id, pv.audience_role_ids, 'ORGANIZATION', pv.valid_from,
-                 pv.reader_selection_id FROM published_knowledge_version pv WHERE pv.published_version_id = $1`, [versionId, ids.orgA]);
+        await client.query(`INSERT INTO published_version (id, review_submission_id, knowledge_base_id,
+            title, version_no, file_uri, content_hash, document_id, classification, owner_department_id,
+            valid_from, reader_policy_id, author_id)
+          SELECT $1, s.id, $3, s.title, 1, s.file_uri, s.content_hash, s.document_id, s.classification,
+                 s.owner_department_id, now(), s.approved_reader_policy_id, s.submitted_by_id
+            FROM review_submission s WHERE s.id = $2`, [versionId, submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
+        await client.query(`INSERT INTO current_publication (document_id, organization_id, published_version_id,
+            target_scope, valid_from, reader_policy_id)
+          SELECT pv.document_id, $2, pv.id, 'ORGANIZATION', pv.valid_from,
+                 pv.reader_policy_id FROM published_version pv WHERE pv.id = $1`, [versionId, ids.orgA]);
       });
       return { draftId, submissionId, versionId };
     };
@@ -1194,15 +1029,15 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     afterEach(async () => {
       const pending = createdGrants.splice(0);
       if (pending.length) await asSuperuser((client) => client.query(
-        "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = ANY($1::uuid[])", [pending]));
+        "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE id = ANY($1::uuid[])", [pending]));
     });
     const grant = (membershipId: string, scope: "DEPARTMENT" | "ORGANIZATION", departmentId: string | null) =>
-      asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
-          department_id, granted_by_membership_id, classifications, level) VALUES ($1, $2, $3, $4, $5, ARRAY['INTERNAL'], 'STANDARD')
-        RETURNING reviewer_grant_id`, [ids.orgA, membershipId, scope, departmentId, ids.authorM]))
+      asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_id, scope,
+          department_id, granted_by_id, classifications, level) VALUES ($1, $2, $3, $4, $5, ARRAY['INTERNAL'], 'STANDARD')
+        RETURNING id AS reviewer_grant_id`, [ids.orgA, membershipId, scope, departmentId, ids.authorM]))
         .then((result) => { const grantId = result.rows[0]!.reviewer_grant_id as string; createdGrants.push(grantId); return grantId; });
     const audits = (eventType: string, documentId: string) => asSuperuser(async (client) => (await client.query<{ count: string }>(
-      "SELECT count(*)::text AS count FROM audit_event WHERE event_type = $1 AND details_json->>'documentId' = $2",
+      "SELECT count(*)::text AS count FROM audit_event WHERE event_type = $1 AND details->>'documentId' = $2",
       [eventType, documentId])).rows[0]?.count);
 
     it("lists metadata only to an Organization Admin and serves a live, audited inspection", async () => {
@@ -1228,18 +1063,18 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(used?.readerNames).toHaveLength(2);
       await expect(repository.useGovernanceInspection(ids.reviewer, ids.orgA, opened.inspectionId)).resolves.toBeNull();
       // Runtime has no direct access to inspections.
-      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query("SELECT * FROM governance_inspection")))
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query("SELECT * FROM inspection")))
         .rejects.toMatchObject({ code: "42501" });
 
       // 15 minutes idle, or 2 hours in total, ends the inspection.
       await asSuperuser((client) => client.query(
-        "UPDATE governance_inspection SET last_used_at = now() - interval '16 minutes', opened_at = now() - interval '20 minutes', expires_at = now() + interval '100 minutes' WHERE inspection_id = $1",
+        "UPDATE inspection SET last_used_at = now() - interval '16 minutes', opened_at = now() - interval '20 minutes', expires_at = now() + interval '100 minutes' WHERE id = $1",
         [opened.inspectionId]));
       await expect(repository.useGovernanceInspection(ids.author, ids.orgA, opened.inspectionId)).resolves.toBeNull();
       const second = await repository.openGovernanceInspection(ids.author, ids.orgA, draftId, "Second look");
       if (second.kind !== "opened") throw new Error("Second inspection was not opened");
       await asSuperuser((client) => client.query(
-        "UPDATE governance_inspection SET opened_at = now() - interval '121 minutes', expires_at = now() - interval '1 minute', last_used_at = now() - interval '1 minute' WHERE inspection_id = $1",
+        "UPDATE inspection SET opened_at = now() - interval '121 minutes', expires_at = now() - interval '1 minute', last_used_at = now() - interval '1 minute' WHERE id = $1",
         [second.inspectionId]));
       await expect(repository.useGovernanceInspection(ids.author, ids.orgA, second.inspectionId)).resolves.toBeNull();
     });
@@ -1270,13 +1105,13 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(spoofed.rows[0]?.outcome).toBe("NOT_FOUND");
       await expect(audits("KNOWLEDGE_PUBLICATION_WITHDRAWN", draftId)).resolves.toBe("0");
       expect((await asSuperuser(client => client.query(
-        "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]))).rowCount).toBe(1);
+        "SELECT 1 FROM current_publication WHERE document_id = $1", [draftId]))).rowCount).toBe(1);
 
       await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Figures are wrong"))
         .resolves.toEqual({ kind: "withdrawn" });
       await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Again")).resolves.toEqual({ kind: "not-found" });
       const pointer = await asSuperuser((client) => client.query(
-        "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]));
+        "SELECT 1 FROM current_publication WHERE document_id = $1", [draftId]));
       expect(pointer.rowCount).toBe(0);
       const authored = (await repository.listKnowledgeSubmissions(ids.author, ids.orgA))?.find((item) => item.id === submissionId);
       expect(authored).toMatchObject({ publicationState: "WITHDRAWN", withdrawal: { by: "ORGANIZATION_ADMIN", reason: "Figures are wrong" } });
@@ -1296,17 +1131,17 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       // Both the temporary Admin role and withdrawal are rolled back, even if an assertion fails.
       await asSuperuser(async (client) => {
         await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-          SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.reviewerM, ids.scopeA]);
+          SELECT $1, id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.reviewerM, ids.scopeA]);
         await client.query("SET LOCAL ROLE arden_runtime");
         await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)",
           [ids.reviewer, ids.orgA]);
         const result = await client.query("SELECT withdraw_publication_directly($1, 'Admin decision') AS outcome", [draftId]);
         expect(result.rows[0]?.outcome).toBe("WITHDRAWN");
         await client.query("RESET ROLE");
-        const provenance = await client.query("SELECT withdrawn_by FROM shared_submission WHERE submission_id = $1", [submissionId]);
+        const provenance = await client.query("SELECT withdrawn_by_role AS withdrawn_by FROM review_submission WHERE id = $1", [submissionId]);
         expect(provenance.rows[0]?.withdrawn_by).toBe("ORGANIZATION_ADMIN");
-        const audit = await client.query(`SELECT details_json->>'withdrawnBy' AS withdrawn_by FROM audit_event
-          WHERE event_type = 'KNOWLEDGE_PUBLICATION_WITHDRAWN' AND details_json->>'documentId' = $1`, [draftId]);
+        const audit = await client.query(`SELECT details->>'withdrawnBy' AS withdrawn_by FROM audit_event
+          WHERE event_type = 'KNOWLEDGE_PUBLICATION_WITHDRAWN' AND details->>'documentId' = $1`, [draftId]);
         expect(audit.rows).toEqual([{ withdrawn_by: "ORGANIZATION_ADMIN" }]);
       }, false);
     });
@@ -1315,12 +1150,12 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, versionId } = await publishSelected("Organization-wide");
       await asSuperuser(async (client) => {
-        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_selection (organization_id, reader_mode)
-          VALUES ($1, 'ORGANIZATION') RETURNING selection_id`, [ids.orgA]);
+        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_policy (organization_id, mode)
+          VALUES ($1, 'ORGANIZATION') RETURNING id AS selection_id`, [ids.orgA]);
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("UPDATE published_knowledge_version SET reader_selection_id = $2 WHERE published_version_id = $1",
+        await client.query("UPDATE published_version SET reader_policy_id = $2 WHERE id = $1",
           [versionId, selection.rows[0]!.selection_id]);
-        await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $2 WHERE shared_draft_id = $1",
+        await client.query("UPDATE current_publication SET reader_policy_id = $2 WHERE document_id = $1",
           [draftId, selection.rows[0]!.selection_id]);
       });
       await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
@@ -1332,39 +1167,38 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toEqual({ kind: "not-found" });
     });
 
-    it("lets only a reader report once, shows reports to responsible people and closes them on withdrawal", async () => {
+    it("accepts one report from an authorized reader and keeps it pinned after withdrawal", async () => {
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, versionId } = await publishSelected("Reported document");
-      await expect(repository.reportPublicationProblem(ids.outsider, ids.orgA, draftId, versionId, "Leak"))
+      await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      const service = new MaintenanceCaseService(repository.maintenance);
+      await expect(repository.reportPublicationProblem(ids.outsider, ids.orgA, draftId, versionId, "Denied"))
         .resolves.toEqual({ kind: "not-found" });
-      await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "Wrong salary column"))
-        .resolves.toMatchObject({ kind: "reported" });
+      const report = await repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "Wrong figure");
+      expect(report.kind).toBe("reported");
+      if (report.kind !== "reported") throw new Error("Expected a maintenance case");
       await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "Still wrong"))
         .resolves.toEqual({ kind: "duplicate" });
-      await expect(asRuntime(ids.engineer, ids.orgA, (client) => client.query("SELECT * FROM publication_report")))
-        .rejects.toMatchObject({ code: "42501" });
-
-      const mine = (reports: Awaited<ReturnType<ArdenRepository["listPublicationReports"]>>) =>
-        reports?.filter((report) => report.documentId === draftId) ?? [];
-      expect(mine(await repository.listPublicationReports(ids.outsider, ids.orgA))).toHaveLength(0);
-      expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(1);
-      await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
-      const [report] = mine(await repository.listPublicationReports(ids.reviewer, ids.orgA));
-      expect(report).toMatchObject({ message: "Wrong salary column", stillCurrent: true, canView: true });
-      await expect(repository.dismissPublicationReport(ids.outsider, ids.orgA, report!.id)).resolves.toBe(false);
-      await expect(repository.dismissPublicationReport(ids.reviewer, ids.orgA, report!.id)).resolves.toBe(true);
-      expect(mine(await repository.listPublicationReports(ids.reviewer, ids.orgA))).toHaveLength(0);
-
-      await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "New issue"))
-        .resolves.toMatchObject({ kind: "reported" });
+      await expect(service.listCases(ids.outsider, ids.orgA, "queue"))
+        .resolves.not.toContainEqual(expect.objectContaining({ caseId: report.reportId }));
+      await expect(service.listCases(ids.reviewer, ids.orgA, "queue"))
+        .resolves.toContainEqual(expect.objectContaining({ caseId: report.reportId }));
       await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Confirmed"))
         .resolves.toEqual({ kind: "not-found" });
-      expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(1);
       await expect(audits("KNOWLEDGE_PUBLICATION_WITHDRAWN", draftId)).resolves.toBe("0");
       await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Confirmed"))
         .resolves.toEqual({ kind: "withdrawn" });
-      expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(0);
+      await expect(service.listCases(ids.engineer, ids.orgA, "mine"))
+        .resolves.toContainEqual({ caseId: report.reportId, kind: "minimal", reporterStatus: "Submitted", unread: false });
+      await expect(service.listCases(ids.reviewer, ids.orgA, "queue"))
+        .resolves.toContainEqual(expect.objectContaining({ caseId: report.reportId, kind: "queue" }));
+      await expect(asSuperuser(client => client.query(
+        "SELECT published_version_id FROM maintenance_case WHERE id = $1", [report.reportId])))
+        .resolves.toMatchObject({ rows: [{ published_version_id: versionId }] });
+      await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "After withdrawal"))
+        .resolves.toEqual({ kind: "not-found" });
     });
+
   });
 
   describe("decision 0032 expired visibility and renewal (migration 0068)", () => {
@@ -1372,38 +1206,38 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     afterEach(async () => {
       const pending = createdGrants.splice(0);
       if (pending.length) await asSuperuser((client) => client.query(
-        "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = ANY($1::uuid[])", [pending]));
+        "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE id = ANY($1::uuid[])", [pending]));
     });
     const utcDay = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
     const departmentGrant = () => asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id,
-        reviewer_membership_id, scope, department_id, granted_by_membership_id, classifications, level)
-      VALUES ($1, $2, 'DEPARTMENT', $3, $4, ARRAY['INTERNAL'], 'STANDARD') RETURNING reviewer_grant_id`,
+        reviewer_id, scope, department_id, granted_by_id, classifications, level)
+      VALUES ($1, $2, 'DEPARTMENT', $3, $4, ARRAY['INTERNAL'], 'STANDARD') RETURNING id AS reviewer_grant_id`,
     [ids.orgA, ids.reviewerM, ids.sales, ids.authorM])).then((result) => { createdGrants.push(result.rows[0]!.reviewer_grant_id); });
     /** A current, indexed publication (readers: author and engineer) whose frozen Valid until is `expires`. */
     const publish = async (title: string, expires: string | null) => {
-      const { draftId, submissionId } = await submitLegacyDraft(title);
+      const { draftId, submissionId } = await submitSelectedDraft(title);
       const versionId = id();
       await asSuperuser(async (client) => {
-        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
-            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
+        await client.query(`UPDATE review_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
+            approved_reader_policy_id = proposed_reader_policy_id WHERE id = $1`, [submissionId]);
         const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
-            (organization_id, name, scope_type) VALUES ($1, 'Renewal fixture ' || $2, 'ORGANIZATION')
-          RETURNING knowledge_base_id`, [ids.orgA, draftId]);
+            (organization_id, name, scope) VALUES ($1, 'Renewal fixture ' || $2, 'ORGANIZATION')
+          RETURNING id AS knowledge_base_id`, [ids.orgA, draftId]);
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
-            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
-            audience_role_ids, valid_from, reader_selection_id, index_status, management)
-          SELECT $1, s.submission_id, $3, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id, s.classification,
-                 s.responsible_department_id, s.audience_role_ids, now() - interval '1 day', s.approved_selection_id, 'INDEXED',
+        await client.query(`INSERT INTO published_version (id, review_submission_id, knowledge_base_id,
+            title, version_no, file_uri, content_hash, document_id, classification, owner_department_id,
+            valid_from, reader_policy_id, index_status, metadata)
+          SELECT $1, s.id, $3, s.title, 1, s.file_uri, s.content_hash, s.document_id, s.classification,
+                 s.owner_department_id, now() - interval '1 day', s.approved_reader_policy_id, 'INDEXED',
                  jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', $4::text, 'changeNote', '')
-            FROM shared_submission s WHERE s.submission_id = $2`,
+            FROM review_submission s WHERE s.id = $2`,
         [versionId, submissionId, knowledgeBase.rows[0]?.knowledge_base_id, expires]);
-        await client.query(`UPDATE published_knowledge_version SET published_at = now() - interval '1 day'
-          WHERE published_version_id = $1`, [versionId]);
-        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
-            audience_role_ids, target_scope_type, valid_from, reader_selection_id)
-          SELECT pv.shared_draft_id, $2, pv.published_version_id, pv.audience_role_ids, 'ORGANIZATION', pv.valid_from,
-                 pv.reader_selection_id FROM published_knowledge_version pv WHERE pv.published_version_id = $1`,
+        await client.query(`UPDATE published_version SET published_at = now() - interval '1 day'
+          WHERE id = $1`, [versionId]);
+        await client.query(`INSERT INTO current_publication (document_id, organization_id, published_version_id,
+            target_scope, valid_from, reader_policy_id)
+          SELECT pv.document_id, $2, pv.id, 'ORGANIZATION', pv.valid_from,
+                 pv.reader_policy_id FROM published_version pv WHERE pv.id = $1`,
         [versionId, ids.orgA]);
       });
       return { draftId, versionId };
@@ -1412,7 +1246,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       repository!.requestPublicationRenewal(userId, ids.orgA, draftId, { expirationDate, reason: "Checked again", idempotencyKey: key }, "renewal");
     const listedFor = async (userId: string) => (await repository!.listPublishedKnowledge(userId, ids.orgA) ?? []).map((item) => item.draftId);
     const pointer = (draftId: string) => asSuperuser(async (client) => (await client.query(
-      "SELECT published_version_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId])).rows[0]);
+      "SELECT published_version_id FROM current_publication WHERE document_id = $1", [draftId])).rows[0]);
     const count = (sql: string, values: unknown[]) => asSuperuser(async (client) =>
       Number((await client.query<{ count: string }>(sql, values)).rows[0]?.count));
 
@@ -1431,7 +1265,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(eligible).not.toContain(expired.versionId);
       await expect(pointer(expired.draftId)).resolves.toEqual({ published_version_id: expired.versionId });
       await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_PUBLICATION_WITHDRAWN'
-        AND details_json->>'documentId' = $1`, [expired.draftId])).resolves.toBe(0);
+        AND details->>'documentId' = $1`, [expired.draftId])).resolves.toBe(0);
       const authorState = await repository.listPublicationRenewalState(ids.author, ids.orgA);
       expect(authorState?.find((item) => item.documentId === expired.draftId)).toMatchObject({ isAuthor: true,
         expirationDate: utcDay(-1), canRenew: true, renewalPending: false, authorActive: true });
@@ -1447,17 +1281,17 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     /** The reviewer holds both scopes so the frozen legacy breadth of these fixtures is covered either way. */
     const reviewerGrants = async () => { await departmentGrant(); await organizationGrant(); };
     const organizationGrant = async () => {
-      await asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
-          department_id, granted_by_membership_id, classifications, level)
-        VALUES ($1, $2, 'ORGANIZATION', NULL, $3, ARRAY['INTERNAL'], 'STANDARD') RETURNING reviewer_grant_id`,
+      await asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_id, scope,
+          department_id, granted_by_id, classifications, level)
+        VALUES ($1, $2, 'ORGANIZATION', NULL, $3, ARRAY['INTERNAL'], 'STANDARD') RETURNING id AS reviewer_grant_id`,
       [ids.orgA, ids.reviewerM, ids.authorM])).then((result) => { createdGrants.push(result.rows[0]!.reviewer_grant_id); });
     };
     const decideAs = (userId: string, submission: { id: string; snapshotVersionId: string; contentHash: string },
       action: "APPROVE" | "REJECT", comment: string | null = null) => repository!.decideReview(userId, ids.orgA, submission.id,
       action, submission.snapshotVersionId, submission.contentHash, comment, randomUUID(), "renewal-decision");
     const decisionAudit = (submissionId: string) => asSuperuser(async (client) => (await client.query<{ details: Record<string, unknown> }>(
-      `SELECT details_json AS details FROM audit_event WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED'
-        AND details_json->>'submissionId' = $1`, [submissionId])).rows.map((row) => row.details));
+      `SELECT details AS details FROM audit_event WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED'
+        AND details->>'submissionId' = $1`, [submissionId])).rows.map((row) => row.details));
 
     it("lets a responsible reviewer renew on the author's behalf and shows it again only after approval", async () => {
       if (!repository) throw new Error("Test database is unavailable");
@@ -1470,12 +1304,12 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         renewal: { expirationDate: utcDay(90), onBehalfOfAuthor: true } } });
       if (requested.kind !== "requested") return;
       await expect(renew(ids.author, draftId, null)).resolves.toEqual({ kind: "pending" });
-      await expect(count(`SELECT count(*) FROM arden_notification WHERE recipient_membership_id = $1
+      await expect(count(`SELECT count(*) FROM notification WHERE recipient_id = $1
         AND event_type = 'PUBLICATION_RENEWAL_ON_BEHALF' AND resource_id = $2 AND request_reason = 'Checked again'
         AND shared_by_name = 'Synthetic reader'`, [ids.authorM, draftId])).resolves.toBe(1);
       await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_CHANGE_REQUESTED'
-        AND details_json->>'submissionId' = $1 AND details_json->>'onBehalfOfAuthor' = 'true'
-        AND details_json->>'requestedBy' = $2`, [requested.submission.id, ids.reviewerM])).resolves.toBe(1);
+        AND details->>'submissionId' = $1 AND details->>'onBehalfOfAuthor' = 'true'
+        AND details->>'requestedBy' = $2`, [requested.submission.id, ids.reviewerM])).resolves.toBe(1);
       // The author sees the request to decide it.
       const authorState = (await repository.listPublicationRenewalState(ids.author, ids.orgA))?.find((item) => item.documentId === draftId);
       expect(authorState?.pending).toMatchObject({ submissionId: requested.submission.id, onBehalfOfAuthor: true,
@@ -1491,7 +1325,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, versionId))
         .resolves.toMatchObject({ expired: false, management: { expirationDate: utcDay(90) } });
       await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_PUBLICATION_RENEWED'
-        AND details_json->>'documentId' = $1 AND details_json->>'onBehalfOfAuthor' = 'true'`, [draftId])).resolves.toBe(1);
+        AND details->>'documentId' = $1 AND details->>'onBehalfOfAuthor' = 'true'`, [draftId])).resolves.toBe(1);
     });
 
     it("gives the active author the first decision on an on-behalf renewal; rejection is final", async () => {
@@ -1503,10 +1337,10 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       // During the window only the author decides: reviewers, including the requester, are refused (DB and API).
       await expect(decideAs(ids.reviewer, asked.submission, "APPROVE"))
         .resolves.toEqual({ kind: "denied", reason: "AUTHOR_DECISION_WINDOW" });
-      await expect(sqlState((client) => client.query(`INSERT INTO review_decision (submission_id, reviewer_membership_id,
-          decision, flow2, decision_request_id, snapshot_version_id, content_hash)
-        SELECT submission_id, submitted_by_membership_id, 'APPROVED', true, gen_random_uuid(), shared_draft_version_id, content_hash
-          FROM shared_submission WHERE submission_id = $1`, [asked.submission.id]))).resolves.toBe("AR032");
+      await expect(sqlState((client) => client.query(`INSERT INTO review_decision (review_submission_id, reviewer_id,
+          decision, is_snapshot_review, decision_request_id, working_version_id, content_hash)
+        SELECT id, submitted_by_id, 'APPROVED', true, gen_random_uuid(), working_version_id, content_hash
+          FROM review_submission WHERE id = $1`, [asked.submission.id]))).resolves.toBe("AR032");
       await expect(decideAs(ids.author, asked.submission, "REJECT")).resolves.toEqual({ kind: "denied", reason: "COMMENT_REQUIRED" });
       await expect(decideAs(ids.author, asked.submission, "REJECT", "Not needed any more"))
         .resolves.toMatchObject({ kind: "decided", submission: { status: "REJECTED", requestType: "RENEWAL" } });
@@ -1531,8 +1365,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (third.kind !== "requested") throw new Error(`Renewal fixture failed: ${third.kind}`);
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query(`UPDATE shared_submission SET submitted_at = now() - interval '4 days',
-            author_decides_until = now() - interval '1 day' WHERE submission_id = $1`,
+        await client.query(`UPDATE review_submission SET submitted_at = now() - interval '4 days',
+            author_response_deadline = now() - interval '1 day' WHERE id = $1`,
           [third.submission.id]);
       });
       await expect(decideAs(ids.reviewer, third.submission, "APPROVE"))
@@ -1554,17 +1388,17 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(await decisionAudit(own.submission.id)).toEqual([expect.objectContaining({ selfApproved: true })]);
 
       const inactive = await publish("Author left", utcDay(25));
-      await asSuperuser((client) => client.query("UPDATE organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1", [ids.authorM]));
+      await asSuperuser((client) => client.query("UPDATE membership SET status = 'SUSPENDED' WHERE id = $1", [ids.authorM]));
       try {
         const asked = await renew(ids.reviewer, inactive.draftId, utcDay(400));
         expect(asked).toMatchObject({ kind: "requested", submission: { renewal: { onBehalfOfAuthor: true } } });
-        await expect(count(`SELECT count(*) FROM arden_notification WHERE event_type = 'PUBLICATION_RENEWAL_ON_BEHALF'
+        await expect(count(`SELECT count(*) FROM notification WHERE event_type = 'PUBLICATION_RENEWAL_ON_BEHALF'
           AND resource_id = $1`, [inactive.draftId])).resolves.toBe(0);
         if (asked.kind !== "requested") return;
         await expect(decideAs(ids.reviewer, asked.submission, "APPROVE"))
           .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
       } finally {
-        await asSuperuser((client) => client.query("UPDATE organization_membership SET status = 'ACTIVE' WHERE membership_id = $1", [ids.authorM]));
+        await asSuperuser((client) => client.query("UPDATE membership SET status = 'ACTIVE' WHERE id = $1", [ids.authorM]));
       }
     });
 
@@ -1621,7 +1455,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (late.kind !== "requested") throw new Error(`Withdrawal fixture failed: ${late.kind}`);
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
-        await client.query("DELETE FROM knowledge_current_publication WHERE shared_draft_id = $1", [gone.draftId]);
+        await client.query("DELETE FROM current_publication WHERE document_id = $1", [gone.draftId]);
       });
       await expect(decideAs(ids.reviewer, late.submission, "APPROVE")).resolves.toEqual({ kind: "denied", reason: "PUBLICATION_CHANGED" });
 
@@ -1631,26 +1465,29 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await asSuperuser(async (client) => {
         await client.query("SET LOCAL session_replication_role = replica");
         // A newer approved content version of the same document, still being prepared.
-        const version = await client.query<{ id: string }>(`INSERT INTO shared_draft_version
-          SELECT (jsonb_populate_record(NULL::shared_draft_version, to_jsonb(v)
-                   || jsonb_build_object('shared_draft_version_id', gen_random_uuid(), 'version_no', v.version_no + 100))).*
-            FROM shared_draft_version v WHERE v.shared_draft_version_id = $1
-          RETURNING shared_draft_version_id AS id`, [race.submission.snapshotVersionId]);
-        await client.query(`INSERT INTO shared_submission (organization_id, shared_draft_id, shared_draft_version_id,
-            snapshot_version_no, submitted_by_membership_id, target_scope_type, responsible_department_id, title,
-            classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type, content_hash,
-            submit_request_id, status, publication_state)
-          SELECT organization_id, shared_draft_id, $2, snapshot_version_no + 100, submitted_by_membership_id, target_scope_type,
-                 responsible_department_id, title, classification, audience_role_ids, policy_version, review_rule, content_uri,
-                 mime_type, content_hash, gen_random_uuid(), 'APPROVED', 'PREPARING'
-            FROM shared_submission WHERE submission_id = $1`, [race.submission.id, version.rows[0]!.id]);
+        const version = await client.query<{ id: string }>(`INSERT INTO working_version
+          (document_id, version_no, file_uri, mime_type, content_hash, size_bytes)
+          SELECT document_id, version_no + 100, file_uri, mime_type, content_hash, size_bytes
+            FROM working_version WHERE id = $1
+          RETURNING id`, [race.submission.snapshotVersionId]);
+        await client.query(`INSERT INTO review_submission (organization_id, document_id, working_version_id,
+            snapshot_version_no, submitted_by_id, target_scope, target_department_id, owner_department_id, title,
+            classification, policy_version, review_rule, file_uri, mime_type, content_hash,
+            submit_request_id, status, publication_state, proposed_reader_policy_id, approved_reader_policy_id)
+          SELECT s.organization_id, s.document_id, $2, s.snapshot_version_no + 100,
+                 s.submitted_by_id, s.target_scope, s.target_department_id, s.owner_department_id, s.title,
+                 s.classification, s.policy_version, s.review_rule, s.file_uri,
+                 s.mime_type, s.content_hash, gen_random_uuid(), 'APPROVED', 'PREPARING', pv.reader_policy_id,
+                 pv.reader_policy_id
+            FROM review_submission s JOIN published_version pv ON pv.id = s.target_published_version_id
+            WHERE s.id = $1`, [race.submission.id, version.rows[0]!.id]);
       });
       await expect(decideAs(ids.reviewer, race.submission, "APPROVE")).resolves.toEqual({ kind: "denied", reason: "PUBLICATION_CHANGED" });
 
       // An Engineering reviewer does not cover this Sales document, reader or not.
-      await asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
-          department_id, granted_by_membership_id, classifications, level)
-        VALUES ($1, $2, 'DEPARTMENT', $3, $4, ARRAY['INTERNAL'], 'STANDARD') RETURNING reviewer_grant_id`,
+      await asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_id, scope,
+          department_id, granted_by_id, classifications, level)
+        VALUES ($1, $2, 'DEPARTMENT', $3, $4, ARRAY['INTERNAL'], 'STANDARD') RETURNING id AS reviewer_grant_id`,
       [ids.orgA, ids.outsiderM, ids.engineering, ids.authorM])).then((result) => { createdGrants.push(result.rows[0]!.reviewer_grant_id); });
       const scoped = await publish("Wrong-scope reviewer", null);
       const scopedRequest = await ask(scoped.draftId, { type: "WITHDRAWAL", reason: "Wrong scope" });
@@ -1664,10 +1501,11 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const draftId = await createDraft(ids.reviewer, ids.orgA, ids.reviewerM, "Reviewer's own guide");
       const configured = await repository.updateKnowledgeDraft(ids.reviewer, ids.orgA, draftId, 1, {
-        responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
+        responsibleDepartmentId: ids.sales,
+        targetReaders: { mode: "ORGANIZATION" },
       }, null, "self-configure");
       if (configured.kind !== "updated") throw new Error(`Configure fixture failed: ${configured.kind}`);
-      await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.reviewerM, ids.engineerM]);
+      await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [], false);
       const submitted = await repository.submitKnowledgeDraft(ids.reviewer, ids.orgA, draftId, 2, randomUUID(), "self-submit");
       if (submitted.kind !== "submitted") throw new Error(`Submit fixture failed: ${submitted.kind}`);
       const own = submitted.submission;
@@ -1691,14 +1529,14 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await repository.enqueuePublicationExpiryReminders();
       await expect(repository.enqueuePublicationExpiryReminders()).resolves.toBe(0);
       const notices = (draftId: string) => asSuperuser(async (client) => (await client.query<{ recipient: string; key: string }>(
-        `SELECT recipient_membership_id AS recipient, event_key AS key FROM arden_notification
+        `SELECT recipient_id AS recipient, event_key AS key FROM notification
           WHERE event_type = 'PUBLICATION_EXPIRING' AND resource_id = $1 ORDER BY event_key`, [draftId])).rows);
       expect(await notices(soon.draftId)).toEqual([
         { recipient: ids.authorM, key: `expiry:${soon.versionId}:${utcDay(5)}:30` },
         { recipient: ids.reviewerM, key: `expiry:${soon.versionId}:${utcDay(5)}:7` }]);
       expect(await notices(month.draftId)).toEqual([{ recipient: ids.authorM, key: `expiry:${month.versionId}:${utcDay(28)}:30` }]);
       expect(await notices(never.draftId)).toEqual([]);
-      await expect(count(`SELECT count(*) FROM arden_notification_outbox o JOIN arden_notification n USING (notification_id)
+      await expect(count(`SELECT count(*) FROM notification_outbox o JOIN notification n ON o.notification_id = n.id
         WHERE n.resource_id = $1`, [soon.draftId])).resolves.toBe(2);
     });
 
@@ -1707,7 +1545,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await publish("Owned by sales", null);
       await expect(repository.deleteDepartment(ids.author, ids.orgA, ids.sales, "delete-department"))
         .resolves.toMatchObject({ success: false, errorReason: "OWNS_PUBLICATIONS" });
-      await expect(count("SELECT count(*) FROM department WHERE department_id = $1 AND status = 'ACTIVE'", [ids.sales])).resolves.toBe(1);
+      await expect(count("SELECT count(*) FROM department WHERE id = $1 AND status = 'ACTIVE'", [ids.sales])).resolves.toBe(1);
     });
   });
 });

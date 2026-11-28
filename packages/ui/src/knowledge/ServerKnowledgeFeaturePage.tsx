@@ -106,15 +106,14 @@ type Props = ContextControlProps & {
   canUsePrivateWorkspace?: boolean;
 };
 
-type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
-  "targetScopeType" | "teamTag" | "projectTag" | "audienceIds"> & { management: KnowledgeMetadata; targetReaders: TargetReaders | null };
+type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId"> & {
+  management: KnowledgeMetadata; targetReaders: TargetReaders | null;
+};
 
 function valuesFromDraft(draft: KnowledgeDraftRecord): EditorValues {
   return {
     title: draft.title, body: draft.body, classification: draft.classification,
     responsibleDepartmentId: draft.responsibleDepartmentId,
-    targetScopeType: draft.targetScopeType, teamTag: draft.teamTag,
-    projectTag: draft.projectTag, audienceIds: [...draft.audienceIds],
     management: editableKnowledgeMetadata(draft.management ?? emptyKnowledgeMetadata()), targetReaders: draft.targetReaders ?? null,
   };
 }
@@ -887,8 +886,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   });
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
   const currentDraftStatus = draft ? draftStatus({ hasPendingSubmission: draft.hasPendingSubmission,
-    responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
-    audienceIds: draft.audienceIds, versionId: draft.currentVersion.id }, latest) : null;
+    responsibleDepartmentId: draft.responsibleDepartmentId,
+    targetReaders: draft.targetReaders, versionId: draft.currentVersion.id }, latest) : null;
   const snapshotAlreadySubmitted = Boolean(latest && draft && latest.snapshotVersionId === draft.currentVersion.id);
   // Decision 0014: a server that reports the member's primary department derives the responsible department itself.
   const { derived: ownerDerived, departmentId: ownerDepartmentId } = ownerDepartment(options?.primaryDepartmentId, editor?.responsibleDepartmentId ?? null);
@@ -924,7 +923,6 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
         : snapshotAlreadySubmitted ? "Already submitted" : "Ready to submit";
   const chooseFile = (file: File | null) => { setNewFile(file); setNewFileError(file ? validatePdfFile(file) : ""); createRequestKey.current = null; };
 
-  const audienceNames = (ids?: string[] | null) => (Array.isArray(ids) ? ids : []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Unavailable readers").join(", ") || "None";
   const selectedContribution = drafts.find((item) => item.id === selectedContributionId) ?? null;
   const selectedContributionLatest = selectedContribution ? latestByDraft.get(selectedContribution.id) : undefined;
   // T6.4: only a document with a current publication and no open request can ask for a reader change or withdrawal.
@@ -1315,7 +1313,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                     <div><dt>Reason</dt><dd>{review.requestReason || "—"}</dd></div>
                   </>}
                   <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
-                  {review.requestType !== "WITHDRAWAL" && <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>}
+                  {review.requestType !== "WITHDRAWAL" && <div><dt>Readers</dt><dd>{review.proposedTargetReaders
+                    ? targetReadersLabel(review.proposedTargetReaders, departmentName)
+                    : review.requestType === "RENEWAL" ? "Existing readers" : "Unavailable"}</dd></div>}
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
@@ -1432,11 +1432,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 : "Ask an admin to assign your department."}</span></p> : <>
             <label className="island-field">Responsible department<select disabled={busy} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
               const responsibleDepartmentId = event.target.value || null;
-              const audienceIds = editor.audienceIds.filter((id) => {
-                const audience = options?.audiences.find((item) => item.id === id);
-                return audience?.kind === "ORGANIZATION_ALL" || !audience?.departmentId || audience.departmentId === responsibleDepartmentId;
-              });
-              setEditor({ ...editor, responsibleDepartmentId, audienceIds });
+              setEditor({ ...editor, responsibleDepartmentId });
             }}>
               <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             </>}

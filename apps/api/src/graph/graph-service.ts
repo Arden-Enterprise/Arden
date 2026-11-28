@@ -349,17 +349,17 @@ export class PgGraphStore implements GraphStore {
     organizationId: string,
   ): Promise<PgActorRow | null> {
     const actorResult = await client.query<PgActorRow>(`
-      SELECT om.membership_id,
+      SELECT om.id AS membership_id,
              om.status,
              o.name AS organization_name,
              ARRAY(
                SELECT dm.department_id::text
                  FROM department_membership dm
                  JOIN department d
-                   ON d.department_id = dm.department_id
+                   ON d.id = dm.department_id
                   AND d.organization_id = om.organization_id
                   AND d.status = 'ACTIVE'
-                WHERE dm.membership_id = om.membership_id
+                WHERE dm.membership_id = om.id
                   AND dm.status = 'ACTIVE'
                 ORDER BY dm.department_id
              ) AS department_ids,
@@ -367,25 +367,25 @@ export class PgGraphStore implements GraphStore {
                SELECT 1
                  FROM role_assignment ra
                  JOIN role r
-                   ON r.role_id = ra.role_id
+                   ON r.id = ra.role_id
                   AND r.code = 'ORG_ADMIN'
                   AND r.is_system
                   AND r.status = 'ACTIVE'
                  JOIN access_scope s
-                   ON s.access_scope_id = ra.access_scope_id
+                   ON s.id = ra.access_scope_id
                   AND s.organization_id = om.organization_id
-                  AND s.scope_type = 'ORGANIZATION'
+                  AND s.scope = 'ORGANIZATION'
                   AND s.status = 'ACTIVE'
-                WHERE ra.membership_id = om.membership_id
+                WHERE ra.membership_id = om.id
                   AND ra.status = 'ACTIVE'
                   AND ra.valid_from <= now()
                   AND (ra.valid_until IS NULL OR ra.valid_until > now())
              ) AS is_org_admin,
              to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS utc_today
-        FROM organization_membership om
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-       WHERE om.user_id = $1
+        FROM membership om
+        JOIN account ua ON ua.id = om.account_id AND ua.status = 'ACTIVE'
+        JOIN organization o ON o.id = om.organization_id AND o.status = 'ACTIVE'
+       WHERE om.account_id = $1
          AND om.organization_id = $2
          AND om.status = 'ACTIVE'`, [userId, organizationId]);
     return actorResult.rows[0] ?? null;
@@ -399,23 +399,23 @@ export class PgGraphStore implements GraphStore {
     const authoredCheck = await client.query<{ has_authored: boolean }>(`
       SELECT EXISTS (
         SELECT 1
-          FROM knowledge_current_publication cp
-          JOIN shared_draft d
-            ON d.shared_draft_id = cp.shared_draft_id
+          FROM current_publication cp
+          JOIN company_document d
+            ON d.id = cp.document_id
            AND d.organization_id = cp.organization_id
            AND d.status = 'ACTIVE'
          WHERE cp.organization_id = $1
            AND cp.valid_from <= now()
            AND (cp.valid_until IS NULL OR cp.valid_until > now())
-           AND d.author_membership_id = $2
+           AND d.author_id = $2
       ) OR EXISTS (
         SELECT 1
-          FROM shared_draft d
-          JOIN shared_submission s
-            ON s.shared_draft_id = d.shared_draft_id
+          FROM company_document d
+          JOIN review_submission s
+            ON s.document_id = d.id
            AND s.organization_id = d.organization_id
          WHERE d.organization_id = $1
-           AND d.author_membership_id = $2
+           AND d.author_id = $2
            AND d.status = 'ACTIVE'
            AND s.status = 'APPROVED'
            AND s.publication_state = 'ACTIVE'
@@ -433,7 +433,7 @@ export class PgGraphStore implements GraphStore {
         SELECT 1
           FROM reviewer_grant g
          WHERE g.organization_id = $1
-           AND g.reviewer_membership_id = $2
+           AND g.reviewer_id = $2
            AND g.status = 'ACTIVE'
            AND g.valid_from <= now()
            AND (g.valid_until IS NULL OR g.valid_until > now())
@@ -450,21 +450,21 @@ export class PgGraphStore implements GraphStore {
     // policies on renewals and reader selections are evaluated per query rather than per row.
     const docsResult = await client.query<PgGraphDocumentRow>(`
       WITH current_pointers AS MATERIALIZED (
-        SELECT organization_id, shared_draft_id, published_version_id, target_scope_type
-          FROM knowledge_current_publication
+        SELECT organization_id, document_id AS shared_draft_id, published_version_id, target_scope AS target_scope_type
+          FROM current_publication
          WHERE organization_id = $1
            AND valid_from <= now()
            AND (valid_until IS NULL OR valid_until > now())
       ), current_versions AS MATERIALIZED (
-        SELECT pv.published_version_id, pv.shared_draft_id, pv.knowledge_base_id,
-               pv.title, pv.management, pv.responsible_department_id, pv.published_at,
-               pv.reader_selection_id, pv.index_status
-          FROM published_knowledge_version pv
-         WHERE pv.published_version_id = ANY (ARRAY(SELECT published_version_id FROM current_pointers))
+        SELECT pv.id AS published_version_id, pv.document_id AS shared_draft_id, pv.knowledge_base_id,
+               pv.title, pv.metadata AS management, pv.owner_department_id AS responsible_department_id, pv.published_at,
+               pv.reader_policy_id AS reader_selection_id, pv.index_status
+          FROM published_version pv
+         WHERE pv.id = ANY (ARRAY(SELECT published_version_id FROM current_pointers))
            AND pv.published_at <= now()
       ), version_renewals AS MATERIALIZED (
-        SELECT r.published_version_id, r.expiration_date
-          FROM publication_validity_renewal r
+        SELECT r.published_version_id, r.valid_until AS expiration_date
+          FROM publication_renewal r
          WHERE r.organization_id = $1
            AND r.published_version_id = ANY (ARRAY(SELECT published_version_id FROM current_versions))
       ), resolved_versions AS (
@@ -475,38 +475,38 @@ export class PgGraphStore implements GraphStore {
           LEFT JOIN version_renewals r
             ON r.published_version_id = pv.published_version_id
       ), visible_selections AS MATERIALIZED (
-        SELECT rs.selection_id, rs.reader_mode, rs.department_id
-          FROM reader_selection rs
-         WHERE rs.selection_id = ANY (ARRAY(
+        SELECT rs.id AS selection_id, rs.mode AS reader_mode, rs.department_id
+          FROM reader_policy rs
+         WHERE rs.id = ANY (ARRAY(
            SELECT DISTINCT reader_selection_id FROM current_versions WHERE reader_selection_id IS NOT NULL
          ))
       ), visible_selected_readers AS MATERIALIZED (
-        SELECT sr.selection_id,
-               array_agg(sr.membership_id::text ORDER BY sr.ordinal) AS member_ids
-          FROM selected_reader sr
-         WHERE sr.selection_id = ANY (ARRAY(SELECT selection_id FROM visible_selections))
-         GROUP BY sr.selection_id
+        SELECT sr.reader_policy_id AS selection_id,
+               array_agg(sr.membership_id::text ORDER BY sr.position) AS member_ids
+          FROM policy_reader sr
+         WHERE sr.reader_policy_id = ANY (ARRAY(SELECT selection_id FROM visible_selections))
+         GROUP BY sr.reader_policy_id
       ), visible_kbs AS MATERIALIZED (
-        SELECT knowledge_base_id, organization_id, scope_type
+        SELECT id AS knowledge_base_id, organization_id, scope AS scope_type
           FROM knowledge_base
          WHERE organization_id = $1
       ), visible_departments AS MATERIALIZED (
-        SELECT department_id, organization_id, name
+        SELECT id AS department_id, organization_id, name
           FROM department
          WHERE organization_id = $1
       ), own_drafts AS MATERIALIZED (
-        SELECT shared_draft_id, organization_id
-          FROM shared_draft
+        SELECT id AS shared_draft_id, organization_id
+          FROM company_document
          WHERE organization_id = $1
-           AND author_membership_id = $2
+           AND author_id = $2
            AND status = 'ACTIVE'
       ), visible_placements AS MATERIALIZED (
-        SELECT shared_draft_id, organization_id, collection_id
-          FROM knowledge_collection_placement
+        SELECT document_id AS shared_draft_id, organization_id, handbook_id AS collection_id
+          FROM handbook_placement
          WHERE organization_id = $1
       ), visible_collections AS MATERIALIZED (
-        SELECT collection_id, organization_id, name, allowed_types
-          FROM knowledge_collection
+        SELECT id AS collection_id, organization_id, name, allowed_types
+          FROM handbook
          WHERE organization_id = $1
            AND status = 'ACTIVE'
       )
@@ -617,7 +617,7 @@ export class PgGraphStore implements GraphStore {
         FROM document_relationship r
        WHERE r.organization_id = $1
          AND (r.source_document_id = $2 OR r.target_document_id = $2)
-         AND ($3::text[] IS NULL OR r.relationship_type = ANY($3::text[]))
+         AND ($3::text[] IS NULL OR r.type = ANY($3::text[]))
        LIMIT $4`, [organizationId, focusDocumentId, relationshipTypes, limit]);
     return result.rows.map((row) => row.peer_id);
   }
@@ -631,17 +631,17 @@ export class PgGraphStore implements GraphStore {
   ): Promise<GraphRawRelationship[]> {
     if (documentIds.length === 0 || limitPlusOne <= 0) return [];
     const result = await client.query<PgRelationshipRow>(`
-      SELECT r.relationship_id,
+      SELECT r.id AS relationship_id,
              r.source_document_id,
              r.target_document_id,
-             r.relationship_type,
+             r.type AS relationship_type,
              r.created_at
         FROM document_relationship r
        WHERE r.organization_id = $1
          AND r.source_document_id = ANY($2::uuid[])
          AND r.target_document_id = ANY($2::uuid[])
-         AND ($3::text[] IS NULL OR r.relationship_type = ANY($3::text[]))
-       ORDER BY r.created_at DESC, r.relationship_id ASC
+         AND ($3::text[] IS NULL OR r.type = ANY($3::text[]))
+       ORDER BY r.created_at DESC, r.id ASC
        LIMIT $4`, [organizationId, documentIds, relationshipTypes, limitPlusOne]);
     return result.rows.map((row) => ({
       relationshipId: row.relationship_id,

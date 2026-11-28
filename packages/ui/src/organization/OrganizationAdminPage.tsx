@@ -67,8 +67,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [reviewerId, setReviewerId] = useState("");
   const [reviewScope, setReviewScope] = useState<ReviewerGrant["scope"]>("DEPARTMENT");
   const [reviewDepartmentId, setReviewDepartmentId] = useState("");
-  const [teamTag, setTeamTag] = useState("");
-  const [projectTag, setProjectTag] = useState("");
   const [grantFilter, setGrantFilter] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
   const [departmentNameInput, setDepartmentNameInput] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -206,8 +204,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       const created = await createReviewerGrant(platform, organizationId, {
         reviewerMembershipId: reviewerId, scope: reviewScope,
         departmentId: reviewScope === "DEPARTMENT" ? reviewDepartmentId : null,
-        teamTag: teamTag.trim() || null, projectTag: projectTag.trim() || null, validUntil: null,
-      }); setLastCreatedGrantId(created.id); setTeamTag(""); setProjectTag(""); setGrantFilter("ACTIVE"); setGrantSubmitted(false);
+        validUntil: null,
+      }); setLastCreatedGrantId(created.id); setGrantFilter("ACTIVE"); setGrantSubmitted(false);
     }, "Reviewer assigned");
   };
   const confirmAction = () => {
@@ -228,7 +226,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const overlappingGrant = reviewerGrants.some((grant) => grant.status === "ACTIVE" && grant.reviewerMembershipId === reviewerId
     && grant.scope === reviewScope
     && (reviewScope === "ORGANIZATION" || grant.departmentId === reviewDepartmentId)
-    && grant.teamTag === (teamTag.trim() || null) && grant.projectTag === (projectTag.trim() || null)
     && grant.level === "STANDARD" && ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"].every((value) =>
       grant.classifications.includes(value as ReviewerGrant["classifications"][number]))
     && (!grant.validUntil || new Date(grant.validUntil).getTime() > Date.now()));
@@ -405,10 +402,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               headers={["REVIEWER", "COVERS", "DOCUMENTS", "STATUS", <span className="sr-only">Actions</span>]}>
               {reviewerGrants.filter((grant) => grant.status === grantFilter).map((grant) => {
                 const reviewer = data.members.find((member) => member.id === grant.reviewerMembershipId);
-                const tags = grant.teamTag || grant.projectTag ? [grant.teamTag && `Team: ${grant.teamTag}`, grant.projectTag && `Project: ${grant.projectTag}`].filter(Boolean).join(" · ") : "All teams and projects";
                 return <IslandRow key={grant.id} selected={lastCreatedGrantId === grant.id} className={grant.status === "INACTIVE" ? "is-muted" : ""}>
                   <IslandCell className="island-row-cell is-name"><span className="island-row-name is-static"><span className="island-avatar is-small" aria-hidden="true">{memberInitials(reviewer?.name ?? "Member")}</span>
-                    <span><strong>{reviewer?.name ?? "Member"}{lastCreatedGrantId === grant.id && <span className="admin-new-tag"> New</span>}</strong><small title={tags}>{tags}</small></span></span></IslandCell>
+                    <span><strong>{reviewer?.name ?? "Member"}{lastCreatedGrantId === grant.id && <span className="admin-new-tag"> New</span>}</strong></span></span></IslandCell>
                   <IslandCell>{grant.scope === "ORGANIZATION" ? "Whole organization" : departmentName(grant.departmentId)}</IslandCell>
                   <IslandCell>{grantCoverageLabel(grant.scope)}</IslandCell>
                   <IslandCell className="island-row-cell is-status"><span className={`island-chip has-dot${grant.status === "ACTIVE" ? " tone-success" : ""}`}>{titleCase(grant.status)}</span><small>{grantValidity(grant)}</small></IslandCell>
@@ -428,12 +424,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             </div></div>
             {reviewScope === "ORGANIZATION" && <p className="island-meta">Company-wide documents only. Assign department reviews separately.</p>}
             {reviewScope === "DEPARTMENT" && <label className="organization-field"><span>Department</span><select id="admin-review-department" disabled={busy} value={reviewDepartmentId} aria-invalid={grantSubmitted && !reviewDepartmentId} aria-describedby="admin-review-department-help" onChange={(event) => setReviewDepartmentId(event.target.value)}><option value="">Choose department</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small id="admin-review-department-help" className={grantSubmitted && !reviewDepartmentId ? "field-error" : ""}>{grantSubmitted && !reviewDepartmentId ? "Choose a department." : ""}</small></label>}
-            <div className="admin-grant-tags">
-              <label className="organization-field"><span>Team tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={teamTag} onChange={(event) => setTeamTag(event.target.value)} /></label>
-              <label className="organization-field"><span>Project tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={projectTag} onChange={(event) => setProjectTag(event.target.value)} /></label>
-            </div>
-            {overlappingGrant && <p className="admin-feedback is-warning" role="status">Review permission already assigned for this scope and tags.</p>}
-            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy || overlappingGrant}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); setError(""); }}>Cancel</button></div>
+            {overlappingGrant && <p className="admin-feedback is-warning" role="status">Review permission already assigned for this scope.</p>}
+            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy || overlappingGrant}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setGrantSubmitted(false); setError(""); }}>Cancel</button></div>
           </form>
           </div>
         </div>}

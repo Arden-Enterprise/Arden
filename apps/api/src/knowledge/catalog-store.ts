@@ -49,22 +49,22 @@ function placement(row: { documentId: string; collectionId: string | null; revis
 /** Collections organize common knowledge, not every source an Admin can read. */
 async function organizationPublications(client: PoolClient, userId: string, organizationId: string): Promise<Set<string>> {
   const actors = await client.query<{ membership_id: string; department_ids: string[] }>(`
-    SELECT om.membership_id, ARRAY(SELECT dm.department_id::text FROM department_membership dm
-      JOIN department d USING (department_id) WHERE dm.membership_id = om.membership_id
+    SELECT om.id AS membership_id, ARRAY(SELECT dm.department_id::text FROM department_membership dm
+      JOIN department d ON dm.department_id = d.id WHERE dm.membership_id = om.id
       AND dm.status = 'ACTIVE' AND d.status = 'ACTIVE') AS department_ids
-    FROM organization_membership om JOIN user_account ua USING (user_id)
-    JOIN organization o USING (organization_id)
-    WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+    FROM membership om JOIN account ua ON om.account_id = ua.id
+    JOIN organization o ON om.organization_id = o.id
+    WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
       AND ua.status = 'ACTIVE' AND o.status = 'ACTIVE'`, [userId, organizationId]);
   const actor = actors.rows[0];
   if (!actor) throw new CatalogError("UNAVAILABLE");
   const sources = await client.query<{ id: string; selection_id: string | null; mode: ReaderSelection["mode"] | null;
     department_id: string | null; member_ids: string[] }>(`
-    SELECT pv.published_version_id AS id, pv.reader_selection_id AS selection_id,
-      rs.reader_mode AS mode, rs.department_id,
-      ARRAY(SELECT sr.membership_id::text FROM selected_reader sr WHERE sr.selection_id = rs.selection_id) AS member_ids
-    FROM knowledge_current_publication cp JOIN published_knowledge_version pv USING (published_version_id)
-    LEFT JOIN reader_selection rs ON rs.selection_id = pv.reader_selection_id
+    SELECT pv.id AS id, pv.reader_policy_id AS selection_id,
+      rs.mode AS mode, rs.department_id,
+      ARRAY(SELECT sr.membership_id::text FROM policy_reader sr WHERE sr.reader_policy_id = rs.id) AS member_ids
+    FROM current_publication cp JOIN published_version pv ON cp.published_version_id = pv.id
+    LEFT JOIN reader_policy rs ON rs.id = pv.reader_policy_id
     WHERE cp.organization_id = $1 AND cp.valid_from <= now()
       AND (cp.valid_until IS NULL OR cp.valid_until > now())`, [organizationId]);
   return new Set(sources.rows.filter(source => matchesPublicationScope(source.mode, "ORGANIZATION")
@@ -86,22 +86,22 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
   async list(userId: string, organizationId: string): Promise<KnowledgeCatalog> {
     return this.withMember(userId, organizationId, async client => {
       const eligible = await organizationPublications(client, userId, organizationId);
-      const admin = await client.query(`SELECT 1 FROM role_assignment ra JOIN role r USING (role_id)
-        JOIN access_scope scope USING (access_scope_id) JOIN organization_membership om USING (membership_id)
-        WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+      const admin = await client.query(`SELECT 1 FROM role_assignment ra JOIN role r ON ra.role_id = r.id
+        JOIN access_scope scope ON ra.access_scope_id = scope.id JOIN membership om ON ra.membership_id = om.id
+        WHERE om.account_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
           AND ra.status = 'ACTIVE' AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now())
           AND r.code = 'ORG_ADMIN' AND r.is_system AND r.status = 'ACTIVE'
-          AND scope.organization_id = $2 AND scope.scope_type = 'ORGANIZATION' AND scope.status = 'ACTIVE'`, [userId, organizationId]);
+          AND scope.organization_id = $2 AND scope.scope = 'ORGANIZATION' AND scope.status = 'ACTIVE'`, [userId, organizationId]);
       const canManage = Boolean(admin.rowCount);
-      const collections = await client.query<CollectionEntry>(`SELECT c.collection_id AS id, c.name,
-        c.description, c.status, c.configuration_version AS version, c.cover, c.allowed_types AS "allowedTypes",
-        ARRAY(SELECT cp.published_version_id::text FROM knowledge_collection_placement p
-          JOIN knowledge_current_publication cp USING (shared_draft_id, organization_id)
-          WHERE p.collection_id = c.collection_id
-            AND collection_source_eligible(p.organization_id, p.shared_draft_id, p.collection_id)
-          ORDER BY p.shared_draft_id) AS "documentIds"
-        FROM knowledge_collection c WHERE c.organization_id = $1 AND ($2 OR c.status = 'ACTIVE')
-        ORDER BY c.name, c.collection_id`, [organizationId, canManage]);
+      const collections = await client.query<CollectionEntry>(`SELECT c.id AS id, c.name,
+        c.description, c.status, c.revision AS version, c.cover, c.allowed_types AS "allowedTypes",
+        ARRAY(SELECT cp.published_version_id::text FROM handbook_placement p
+          JOIN current_publication cp USING (document_id, organization_id)
+          WHERE p.handbook_id = c.id
+            AND collection_source_eligible(p.organization_id, p.document_id, p.handbook_id)
+          ORDER BY p.document_id) AS "documentIds"
+        FROM handbook c WHERE c.organization_id = $1 AND ($2 OR c.status = 'ACTIVE')
+        ORDER BY c.name, c.id`, [organizationId, canManage]);
       return { canManage, collections: collections.rows.flatMap(collection => {
         const documentIds = collection.documentIds.filter(id => eligible.has(id));
         // Admin can repair empty/unconfigured shells; members discover only
@@ -126,28 +126,24 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
       const result = await this.withAdmin(userId, organizationId, async (client, actor) => {
         // Shared with placement mutations; DB triggers also serialize worker eligibility changes.
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`arden:knowledge-catalog:${organizationId}`]);
-        const table = "knowledge_collection";
-        const key = "collection_id";
         if (id) {
-          const previous = await client.query<{ version: number }>(`SELECT configuration_version AS version FROM ${table}
-            WHERE organization_id = $1 AND ${key} = $2 FOR UPDATE`, [organizationId, id]);
+          const previous = await client.query<{ version: number }>(`SELECT revision AS version FROM handbook
+            WHERE organization_id = $1 AND id = $2 FOR UPDATE`, [organizationId, id]);
           if (!previous.rows[0]) throw new CatalogError("UNAVAILABLE");
           if (previous.rows[0].version !== version) throw new CatalogError("CONFLICT");
         }
-        const columns = kind === "collections" ? ", cover, allowed_types" : "";
-        const values: unknown[] = [organizationId, name, description.trim(), input.status];
-        if (kind === "collections") values.push(input.cover ?? "handbook", input.allowedTypes);
+        const values = [organizationId, name, description.trim(), input.status, input.cover ?? "handbook", input.allowedTypes];
         const saved = id
-          ? await client.query<CatalogEntry>(`UPDATE ${table} SET name = $2, description = $3, status = $4,
-              configuration_version = configuration_version + 1 ${kind === "collections" ? ", cover = $5, allowed_types = $6" : ""}
-              WHERE organization_id = $1 AND ${key} = $${values.length + 1}
-              RETURNING ${key} AS id, name, description, status, configuration_version AS version`, [...values, id])
-          : await client.query<CatalogEntry>(`INSERT INTO ${table} (organization_id, name, description, status${columns})
-              VALUES ($1, $2, $3, $4${kind === "collections" ? ", $5, $6" : ""})
-              RETURNING ${key} AS id, name, description, status, configuration_version AS version`, values);
+          ? await client.query<CatalogEntry>(`UPDATE handbook SET name = $2, description = $3, status = $4,
+              revision = revision + 1, cover = $5, allowed_types = $6
+              WHERE organization_id = $1 AND id = $7
+              RETURNING id AS id, name, description, status, revision AS version`, [...values, id])
+          : await client.query<CatalogEntry>(`INSERT INTO handbook (organization_id, name, description, status, cover, allowed_types)
+              VALUES ($1, $2, $3, $4, $5, $6)
+              RETURNING id AS id, name, description, status, revision AS version`, values);
         const entry = saved.rows[0];
         if (!entry) throw new CatalogError("UNAVAILABLE");
-        await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
           VALUES ($1, $2, 'KNOWLEDGE_CATALOG_CHANGED', 'SUCCESS', $3::jsonb)`, [organizationId, actor,
           JSON.stringify({ kind, catalogId: entry.id, version: entry.version, requestId })]);
         return entry;
@@ -164,8 +160,8 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
       const source = await client.query<{ eligible: boolean }>("SELECT collection_source_eligible($1, $2, NULL) AS eligible", [organizationId, documentId]);
       if (!source.rows[0]?.eligible) throw new CatalogError("UNAVAILABLE");
       const current = await client.query<{ documentId: string; collectionId: string | null; revision: string }>(`
-        SELECT shared_draft_id AS "documentId", collection_id AS "collectionId", placement_revision::text AS revision
-        FROM knowledge_collection_placement WHERE organization_id = $1 AND shared_draft_id = $2`, [organizationId, documentId]);
+        SELECT document_id AS "documentId", handbook_id AS "collectionId", revision::text AS revision
+        FROM handbook_placement WHERE organization_id = $1 AND document_id = $2`, [organizationId, documentId]);
       return current.rows[0] ? placement(current.rows[0]) : { documentId, collectionId: null, revision: 0 };
     });
     if (!result) throw new CatalogError("UNAVAILABLE");
@@ -182,18 +178,18 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
         if (!source.rows[0]?.eligible) throw new CatalogError("UNAVAILABLE");
         const saved = revision === 0
           ? await client.query<{ documentId: string; collectionId: string | null; revision: string }>(`
-              INSERT INTO knowledge_collection_placement (organization_id, shared_draft_id, collection_id)
-              VALUES ($1, $2, $3) ON CONFLICT (shared_draft_id) DO NOTHING
-              RETURNING shared_draft_id AS "documentId", collection_id AS "collectionId", placement_revision::text AS revision`,
+              INSERT INTO handbook_placement (organization_id, document_id, handbook_id)
+              VALUES ($1, $2, $3) ON CONFLICT (document_id) DO NOTHING
+              RETURNING document_id AS "documentId", handbook_id AS "collectionId", revision::text AS revision`,
             [organizationId, documentId, collectionId])
           : await client.query<{ documentId: string; collectionId: string | null; revision: string }>(`
-              UPDATE knowledge_collection_placement SET collection_id = $3
-              WHERE organization_id = $1 AND shared_draft_id = $2 AND placement_revision = $4
-              RETURNING shared_draft_id AS "documentId", collection_id AS "collectionId", placement_revision::text AS revision`,
+              UPDATE handbook_placement SET handbook_id = $3
+              WHERE organization_id = $1 AND document_id = $2 AND revision = $4
+              RETURNING document_id AS "documentId", handbook_id AS "collectionId", revision::text AS revision`,
             [organizationId, documentId, collectionId, revision]);
         if (!saved.rows[0]) throw new CatalogError("CONFLICT");
         const entry = placement(saved.rows[0]);
-        await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        await client.query(`INSERT INTO audit_event (organization_id, actor_id, event_type, outcome, details)
           VALUES ($1, $2, 'KNOWLEDGE_COLLECTION_PLACED', 'SUCCESS', $3::jsonb)`, [organizationId, actor,
           JSON.stringify({ ...entry, requestId })]);
         return entry;
